@@ -84,6 +84,7 @@ enum MODEM_MODE {
 #define MODEM_FORMAT MFMT_S16_LE
 #define MODEM_RATE   9600 /* 8000 */
 #define MODEM_FRAG   (MODEM_RATE/200)
+#define MODEM_FRAMESIZE	(MODEM_RATE/(1000/20)) //20ms
 
 
 #define MODEM_MIN_RATE 300
@@ -110,6 +111,12 @@ struct modem_driver {
         int (*start)(struct modem *m);
         int (*stop )(struct modem *m);
 	int (*ioctl)(struct modem *m,unsigned cmd, unsigned long arg);
+};
+
+/* socket frame definition */
+struct modem_socket_frame {
+	unsigned char buf[MODEM_FRAMESIZE * 2]; //16bit
+	int volume;
 };
 
 /* modem data pumps driver struct */

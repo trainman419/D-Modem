@@ -137,6 +137,7 @@ static char  inbuf[4096];
 static char outbuf[4096];
 
 static pid_t pid = 0;
+static int modem_volume = 0;
 
 /*
  *    ALSA 'driver'
@@ -474,7 +475,7 @@ static int alsa_start (struct modem *m)
 	if(err < 0)
 		return err;
 	dev->delay = 0;
-	len = use_short_buffer ? dev->period * dev->buf_periods : 384;
+	len = use_short_buffer ? dev->period * dev->buf_periods : MODEM_FRAMESIZE * 2;
 	DBG("startup write: %d...\n",len);
 	err = snd_pcm_format_set_silence(SND_PCM_FORMAT_S16_LE, outbuf, len);
 	if(err < 0) {
@@ -572,13 +573,15 @@ static int modemap_start (struct modem *m)
         ret = ioctl(dev->fd,100000+MDMCTL_START,0);
 	if (ret < 0)
 		return ret;
-	ret = 192*2;
+	ret = MODEM_FRAMESIZE * 2;
 	memset(outbuf, 0 , ret);
+#if 0
 	ret = write(dev->fd, outbuf, ret);
 	if (ret < 0) {
 		ioctl(dev->fd,100000+MDMCTL_STOP,0);
 		return ret;
 	}
+#endif
 	dev->delay = ret/2;
 	return 0;
 }
@@ -647,9 +650,11 @@ static int socket_start (struct modem *m)
 		close(sockets[0]);
 		dev->fd = sockets[1];
 		dev->delay = 0;
-		ret = 192*2;
+		ret = MODEM_FRAMESIZE * 2;
 		memset(outbuf, 0 , ret);
+#if 0
 		ret = write(dev->fd, outbuf, ret);
+#endif
 		DBG("done delay thing\n");
 		if (ret < 0) {
 			return ret;
@@ -691,6 +696,10 @@ static int socket_ioctl(struct modem *m, unsigned int cmd, unsigned long arg)
 		//ret += dev->delay;
 		//DBG("%d %d %d %d",m->format,MFMT_SHIFT(m->format),dev->delay,ret);
 		break;
+	case MDMCTL_SPEAKERVOL:
+		modem_volume = arg;
+		ret = 0;
+		break;
 	case MDMCTL_HOOKSTATE: // 0 = on, 1 = off
 	case MDMCTL_SPEED: // sample rate (9600)
 	case MDMCTL_GETFMTS:
@@ -725,8 +734,19 @@ static int mdm_device_read(struct device_struct *dev, char *buf, int size)
 
 static int mdm_device_write(struct device_struct *dev, const char *buf, int size)
 {
-	int ret = write(dev->fd, buf, size*2);
-	if (ret > 0) ret /= 2;
+	struct modem_socket_frame modem_frame = { 0 };
+
+	if ((size * 2) < sizeof(((struct modem_socket_frame*)0)->buf)) {
+		return 0;
+	}
+
+	memcpy(modem_frame.buf, buf, sizeof(modem_frame.buf));
+	modem_frame.volume = modem_volume;
+
+	int ret = write(dev->fd, &modem_frame, sizeof(modem_frame));
+	if (ret > 0 && ret != sizeof(modem_frame)) ERR("error writing!");
+	if (ret > 0) ret = sizeof(modem_frame.buf) / 2;
+
 	return ret;
 }
 #if 0

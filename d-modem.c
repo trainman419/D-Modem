@@ -25,6 +25,8 @@
 
 #include <pjsua-lib/pjsua.h>
 
+#include "slmodemd/modem.h"
+
 #define SIGNATURE PJMEDIA_SIG_CLASS_PORT_AUD('D','M')
 
 struct dmodem {
@@ -36,6 +38,9 @@ struct dmodem {
 static struct dmodem port;
 static bool destroying = false;
 static pj_pool_t *pool;
+
+static int volume = 0;
+static pjsua_conf_port_id left_audio_id, right_audio_id;
 
 static void error_exit(const char *title, pj_status_t status) {
 	pjsua_perror(__FILE__, title, status);
@@ -61,11 +66,42 @@ static pj_status_t dmodem_put_frame(pjmedia_port *this_port, pjmedia_frame *fram
 
 static pj_status_t dmodem_get_frame(pjmedia_port *this_port, pjmedia_frame *frame) {
 	struct dmodem *sm = (struct dmodem *)this_port;
-	frame->size = PJMEDIA_PIA_AVG_FSZ(&this_port->info); // MAX? what is
+	struct modem_socket_frame modem_frame = { 0 };
+
+	frame->size = PJMEDIA_PIA_MAX_FSZ(&this_port->info);
+	if (frame->size != MODEM_FRAMESIZE * 2) {
+		fprintf(stderr,"incompatible frame size: %lu, expected: %d!\n", frame->size, MODEM_FRAMESIZE * 2);
+		exit(EXIT_FAILURE);
+	}
 
 	int len;
-	if ((len=read(sm->sock, frame->buf, frame->size)) != frame->size) {
+	if ((len=read(sm->sock, &modem_frame, sizeof(modem_frame))) != sizeof(modem_frame)) {
 		error_exit("error reading frame",0);
+	}
+
+	len = frame->size;
+	memcpy(frame->buf, modem_frame.buf, len);
+	if (modem_frame.volume != volume) {
+		float level = 0.0;
+		switch (modem_frame.volume) {
+			case 0:
+				level = 0.0;
+				break;
+			case 1:
+				level = 1.0/3.0;
+				break;
+			case 2:
+				level = 2.0/3.0;
+				break;
+			case 3:
+			default:
+				level = 1.0;
+				break;
+		}
+		printf("Volume: %d -> %f\n", modem_frame.volume, level);
+		pjsua_conf_adjust_tx_level(left_audio_id, level);
+		pjsua_conf_adjust_tx_level(right_audio_id, level);
+		volume = modem_frame.volume;
 	}
 
 	frame->timestamp.u64 = sm->timestamp.u64;
@@ -103,6 +139,8 @@ static void on_call_state(pjsua_call_id call_id, pjsip_event *e) {
 
 /* Callback called by the library when call's media state has changed */
 static void on_call_media_state(pjsua_call_id call_id) {
+	pjmedia_snd_port *audiodev;
+	pjmedia_port *sc, *left, *right;
 	pjsua_call_info ci;
 	pjsua_conf_port_id port_id;
 	static int done=0;
@@ -115,6 +153,39 @@ static void on_call_media_state(pjsua_call_id call_id) {
 			pjsua_conf_add_port(pool, &port.base, &port_id);
 			pjsua_conf_connect(ci.conf_slot, port_id);
 			pjsua_conf_connect(port_id, ci.conf_slot);
+
+			if (pjmedia_splitcomb_create(pool, MODEM_RATE, 2, MODEM_FRAMESIZE, 16, 0, &sc) != PJ_SUCCESS)
+				error_exit("can't create splitter/combiner",0);
+
+			// left
+			if (pjmedia_splitcomb_create_rev_channel(pool, sc, 0, 0, &left) != PJ_SUCCESS)
+				error_exit("can't create left channel",0);
+			if (pjsua_conf_add_port(pool, left, &left_audio_id) != PJ_SUCCESS)
+				error_exit("can't add left port",0);
+			if (pjsua_conf_connect(ci.conf_slot, left_audio_id) != PJ_SUCCESS)
+				error_exit("can't connect left port",0);
+			pjsua_conf_adjust_tx_level(left_audio_id, 0.0);
+
+			// right
+			if (pjmedia_splitcomb_create_rev_channel(pool, sc, 1, 0, &right) != PJ_SUCCESS)
+				error_exit("can't create right channel",0);
+			if (pjsua_conf_add_port(pool, right, &right_audio_id) != PJ_SUCCESS)
+				error_exit("can't add right port",0);
+			if (pjsua_conf_connect(port_id, right_audio_id) != PJ_SUCCESS)
+				error_exit("can't connect right port",0);
+			pjsua_conf_adjust_tx_level(right_audio_id, 0.0);
+
+			if (pjmedia_snd_port_create(pool, -1, -1, MODEM_RATE, 2, MODEM_FRAMESIZE, 16, 0, &audiodev) != PJ_SUCCESS)
+				error_exit("can't create audio device port",0);
+			if (pjmedia_snd_port_connect(audiodev, sc) != PJ_SUCCESS)
+				error_exit("can't connect audio device port",0);
+
+			//Kick off audio
+			printf("Kicking off audio!\n");
+			char buf[MODEM_FRAMESIZE*2];
+			memset(buf,0,sizeof(buf));
+			write(port.sock, buf, sizeof(buf));
+
 			done = 1;
 		}
 	}
@@ -176,6 +247,8 @@ int main(int argc, char *argv[]) {
 		log_cfg.console_level = 4;
 
 		pjsua_media_config_default(&med_cfg);
+		med_cfg.clock_rate = MODEM_RATE;
+		med_cfg.quality = 10;
 		med_cfg.no_vad = true;
 		med_cfg.ec_tail_len = 0;
 		med_cfg.jb_max = 2000;
@@ -222,15 +295,13 @@ int main(int argc, char *argv[]) {
 	
 	memset(&port,0,sizeof(port));
 	port.sock = atoi(argv[2]); // inherited from parent
-	pjmedia_port_info_init(&port.base.info, &name, SIGNATURE, 9600, 1, 16, 192);
+	pjmedia_port_info_init(&port.base.info, &name, SIGNATURE, MODEM_RATE, 1, 16, MODEM_FRAMESIZE);
 	port.base.put_frame = dmodem_put_frame;
 	port.base.get_frame = dmodem_get_frame;
 	port.base.on_destroy = dmodem_on_destroy;
 
-	char buf[384];
-	memset(buf,0,sizeof(buf));
-	write(port.sock, buf, sizeof(buf));
 
+	char buf[1024] = { 0 };
 	/* Initialization is done, now start pjsua */
 	status = pjsua_start();
 	if (status != PJ_SUCCESS) error_exit("Error starting pjsua", status);
