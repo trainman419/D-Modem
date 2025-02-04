@@ -1091,7 +1091,11 @@ int modem_main(const char *dev_name)
 	prop_dp_init();
 	modem_timer_init();
 
-	sprintf(link_name,"/dev/ttySL%d", device.num);
+	if (getuid() == 0) {
+		sprintf(link_name,"/dev/ttySL%d", device.num);
+	} else {
+		sprintf(link_name,"/tmp/ttySL%d", device.num);
+	}
 
 	m = modem_create(modem_driver,basename(dev_name));
 	m->name = basename(dev_name);
@@ -1108,6 +1112,18 @@ int modem_main(const char *dev_name)
 	     m->name, m->pty_name);
 
 	sprintf(path_name,"/var/lib/slmodem/data.%s",basename(dev_name));
+	if (getuid() != 0) {
+		const char *home;
+
+		home = getenv("HOME");
+		if (home == NULL) {
+			home = getpwuid(getuid())->pw_dir;
+		}
+
+		if (home != NULL) {
+			sprintf(path_name,"%s/.config/slmodem/data.%s",home,basename(dev_name));
+		}
+	}
 	datafile_load_info(path_name,&m->dsp_info);
 
 	if (need_realtime) {
