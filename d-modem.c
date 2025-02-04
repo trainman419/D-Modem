@@ -245,7 +245,14 @@ int main(int argc, char *argv[]) {
 		if (status != PJ_SUCCESS) error_exit("Error adding account", status);
 	}
 
-	snprintf(buf,sizeof(buf),"sip:%s@%s",dialstr,sip_domain);
+	char *dial = dialstr;
+	//handle atdt and atdp
+	if (dial[0] == 't' || dial[0] == 'T' ||
+	    dial[0] == 'p' || dial[0] == 'P') {
+		dial++;
+	}
+
+	snprintf(buf,sizeof(buf),"sip:%s@%s",dial,sip_domain);
 	printf("calling %s\n",buf);
 	pj_str_t uri = pj_str(buf);
 	
