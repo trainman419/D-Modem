@@ -873,6 +873,11 @@ void mark_termination(int signum)
 	keep_running = 0;
 }
 
+void child_conn_closed(int signum)
+{
+	DBG("signal %d: connection to child closed.\n",signum);
+}
+
 
 static int modem_run(struct modem *m, struct device_struct *dev)
 {
@@ -975,10 +980,15 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 			}
 
 			modem_process(m,inbuf,outbuf,count);
+			errno = 0;
 			count = device_write(dev,outbuf,count);
 			if(count < 0) {
-				ERR("dev write: %s\n",strerror(errno));
-				return -1;
+				if (errno == EPIPE) {
+					continue;
+				} else {
+					ERR("dev write: %s\n",strerror(errno));
+					return -1;
+				}
 			}
 			else if (count == 0) {
 				DBG("dev write = 0\n");
@@ -1115,6 +1125,7 @@ int modem_main(const char *dev_name)
 	signal(SIGINT, mark_termination);
 	signal(SIGTERM, mark_termination);
 	signal(SIGCHLD, SIG_IGN);
+	signal(SIGPIPE, child_conn_closed);
 
 #ifdef SLMODEMD_USER
 	if (getuid() == 0) {
