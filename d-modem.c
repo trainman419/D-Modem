@@ -122,6 +122,17 @@ static void on_call_media_state(pjsua_call_id call_id) {
 	}
 }
 
+static void sig_handler(int sig, siginfo_t *si, void *x) {
+	switch(sig) {
+		case SIGTERM:
+			pjsua_call_hangup_all();
+			exit(EXIT_SUCCESS);
+			break;
+		default:
+			break;
+	}
+}
+
 
 int main(int argc, char *argv[]) {
 	pjsua_acc_id acc_id;
@@ -255,7 +266,15 @@ int main(int argc, char *argv[]) {
 	snprintf(buf,sizeof(buf),"sip:%s@%s",dial,sip_domain);
 	printf("calling %s\n",buf);
 	pj_str_t uri = pj_str(buf);
-	
+
+	struct sigaction sa = { 0 };
+	sa.sa_flags = SA_SIGINFO;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_sigaction = sig_handler;
+	sigaction(SIGTERM, &sa, NULL);
+
+	printf("Dialer PID: %d\n", getpid());
+
 	pjsua_call_id callid;
 	status = pjsua_call_make_call(acc_id, &uri, 0, NULL, NULL, &callid);
 	if (status != PJ_SUCCESS) error_exit("Error making call", status);
