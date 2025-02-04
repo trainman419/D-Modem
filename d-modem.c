@@ -117,8 +117,6 @@ static void on_call_media_state(pjsua_call_id call_id) {
 			pjsua_conf_connect(port_id, ci.conf_slot);
 			done = 1;
 		}
-	} else {
-		done = 0;
 	}
 }
 
