@@ -136,7 +136,7 @@ struct device_struct {
 static char  inbuf[4096];
 static char outbuf[4096];
 
-static pid_t pid;
+static pid_t pid = 0;
 
 /*
  *    ALSA 'driver'
@@ -664,7 +664,10 @@ static int socket_stop (struct modem *m)
 	struct device_struct *dev = m->dev_data;
 	DBG("socket_stop...\n");
 	DBG("kill -%d %d\n", SIGTERM, pid);
-	kill(pid, SIGTERM);	// terminate exec'ed child
+	if (pid) {
+		kill(pid, SIGTERM);	// terminate exec'ed child
+	}
+	pid = 0;
 	return 0;
 }
 
