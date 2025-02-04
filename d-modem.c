@@ -200,7 +200,7 @@ int main(int argc, char *argv[]) {
 		pjsua_transport_config cfg;
 
 		pjsua_transport_config_default(&cfg);
-		cfg.port = 5060;
+		cfg.port = 0;
 		status = pjsua_transport_create(PJSIP_TRANSPORT_UDP, &cfg, NULL);
 		if (status != PJ_SUCCESS) error_exit("Error creating transport", status);
 	}
