@@ -70,7 +70,7 @@ static pj_status_t dmodem_get_frame(pjmedia_port *this_port, pjmedia_frame *fram
 
 	frame->timestamp.u64 = sm->timestamp.u64;
 	frame->type = PJMEDIA_FRAME_TYPE_AUDIO;
-	sm->timestamp.u64 += PJMEDIA_PIA_SPF(&this_port->info);
+	sm->timestamp.u64 += PJMEDIA_PIA_PTIME(&this_port->info);
 
 	return PJ_SUCCESS;
 }
