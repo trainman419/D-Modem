@@ -29,10 +29,6 @@
 
 #define SIGNATURE PJMEDIA_SIG_CLASS_PORT_AUD('D','M')
 
-// Clock and framesize for the PJSIP stack, 8khz, 20ms frames (G.711)
-#define CLOCK 8000
-#define FRAMESIZE (CLOCK/(1000/20))
-
 struct dmodem {
 	pjmedia_port base;
 	pj_timestamp timestamp;
@@ -73,8 +69,8 @@ static pj_status_t dmodem_get_frame(pjmedia_port *this_port, pjmedia_frame *fram
 	struct modem_socket_frame modem_frame = { 0 };
 
 	frame->size = PJMEDIA_PIA_MAX_FSZ(&this_port->info);
-	if (frame->size != MODEM_FRAMESIZE * 2) {
-		fprintf(stderr,"incompatible frame size: %lu, expected: %d!\n", frame->size, MODEM_FRAMESIZE * 2);
+	if (frame->size != SIP_FRAMESIZE * 2) {
+		fprintf(stderr,"incompatible frame size: %lu, expected: %d!\n", frame->size, SIP_FRAMESIZE * 2);
 		exit(EXIT_FAILURE);
 	}
 
@@ -147,7 +143,6 @@ static void on_call_media_state(pjsua_call_id call_id) {
 	pjmedia_port *sc, *left, *right;
 	pjsua_call_info ci;
 	pjsua_conf_port_id port_id;
-	pjmedia_port *p_port;
 	static int done=0;
 
 	pjsua_call_get_info(call_id, &ci);
@@ -155,11 +150,7 @@ static void on_call_media_state(pjsua_call_id call_id) {
 //	printf("media_status %d media_cnt %d ci.conf_slot %d aud.conf_slot %d\n",ci.media_status,ci.media_cnt,ci.conf_slot,ci.media[0].stream.aud.conf_slot);
 	if (ci.media_status == PJSUA_CALL_MEDIA_ACTIVE) {
 		if (!done) {
-			//PJMEDIA_RESAMPLE_USE_SMALL_FILTER lets 56k work somehow
-			if (pjmedia_resample_port_create(pool, &port.base, CLOCK, PJMEDIA_RESAMPLE_USE_SMALL_FILTER, &p_port) != PJ_SUCCESS)
-				error_exit("can't create resampler",0);
-
-			if (pjsua_conf_add_port(pool, p_port, &port_id) != PJ_SUCCESS)
+			if (pjsua_conf_add_port(pool, &port.base, &port_id) != PJ_SUCCESS)
 				error_exit("can't add modem port",0);
 			if (pjsua_conf_connect(ci.conf_slot, port_id) != PJ_SUCCESS)
 				error_exit("can't connect modem port (out)",0);
@@ -169,7 +160,7 @@ static void on_call_media_state(pjsua_call_id call_id) {
 			//pjsua_conf_adjust_rx_level(port_id, 1.0);
 			//pjsua_conf_adjust_rx_level(ci.conf_slot, 1.0);
 
-			if (pjmedia_splitcomb_create(pool, CLOCK, 2, FRAMESIZE, 16, 0, &sc) != PJ_SUCCESS)
+			if (pjmedia_splitcomb_create(pool, SIP_RATE, 2, SIP_FRAMESIZE, 16, 0, &sc) != PJ_SUCCESS)
 				error_exit("can't create splitter/combiner",0);
 
 			// left
@@ -190,14 +181,14 @@ static void on_call_media_state(pjsua_call_id call_id) {
 				error_exit("can't connect right port",0);
 			pjsua_conf_adjust_tx_level(right_audio_id, 0.0);
 
-			if (pjmedia_snd_port_create(pool, -1, -1, CLOCK, 2, FRAMESIZE, 16, 0, &audiodev) != PJ_SUCCESS)
+			if (pjmedia_snd_port_create(pool, -1, -1, SIP_RATE, 2, SIP_FRAMESIZE, 16, 0, &audiodev) != PJ_SUCCESS)
 				error_exit("can't create audio device port",0);
 			if (pjmedia_snd_port_connect(audiodev, sc) != PJ_SUCCESS)
 				error_exit("can't connect audio device port",0);
 
 			//Kick off audio
 			printf("Kicking off audio!\n");
-			char buf[MODEM_FRAMESIZE*2];
+			char buf[SIP_FRAMESIZE*2];
 			memset(buf,0,sizeof(buf));
 			write(port.sock, buf, sizeof(buf));
 
@@ -262,7 +253,7 @@ int main(int argc, char *argv[]) {
 		log_cfg.console_level = 4;
 
 		pjsua_media_config_default(&med_cfg);
-		med_cfg.clock_rate = CLOCK;
+		med_cfg.clock_rate = SIP_RATE;
 		med_cfg.quality = 10;
 		med_cfg.no_vad = true;
 		med_cfg.ec_tail_len = 0;
@@ -314,7 +305,7 @@ int main(int argc, char *argv[]) {
 	
 	memset(&port,0,sizeof(port));
 	port.sock = atoi(argv[2]); // inherited from parent
-	pjmedia_port_info_init(&port.base.info, &name, SIGNATURE, MODEM_RATE, 1, 16, MODEM_FRAMESIZE);
+	pjmedia_port_info_init(&port.base.info, &name, SIGNATURE, SIP_RATE, 1, 16, SIP_FRAMESIZE);
 	port.base.put_frame = dmodem_put_frame;
 	port.base.get_frame = dmodem_get_frame;
 	port.base.on_destroy = dmodem_on_destroy;

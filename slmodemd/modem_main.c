@@ -105,6 +105,12 @@ extern int datafile_load_info(char *name,struct dsp_info *info);
 extern int datafile_save_info(char *name,struct dsp_info *info);
 extern int modem_ring_detector_start(struct modem *m);
 
+/* Rate conversion */
+extern void *RcFixed_Create(int mode); // 2 -> 8->9.6; 3 -> 9.6->8
+extern void RcFixed_Delete(void *rc);
+extern void RcFixed_Resample(void *rc, char *in, unsigned int inlen, char *out, int *sizeinout);
+extern void RcFixed_Reset(void *rc);
+
 /* global config data */
 extern const char *modem_dev_name;
 extern unsigned int ring_detector;
@@ -138,6 +144,8 @@ static char outbuf[4096];
 
 static pid_t pid = 0;
 static int modem_volume = 0;
+static void *rcSIPtoMODEM = NULL;
+static void *rcMODEMtoSIP = NULL;
 
 /*
  *    ALSA 'driver'
@@ -657,6 +665,12 @@ static int socket_start (struct modem *m)
 			exit(EXIT_FAILURE);
 		}
 		dev->delay = MODEM_FRAMESIZE;
+		rcSIPtoMODEM = RcFixed_Create(2);
+		rcMODEMtoSIP = RcFixed_Create(3);
+		if (rcSIPtoMODEM == NULL || rcMODEMtoSIP == NULL) {
+			ERR("Can't create resampler");
+			exit(EXIT_FAILURE);
+		}
 	}
 	return 0;
 }
@@ -668,6 +682,14 @@ static int socket_stop (struct modem *m)
 	DBG("kill -%d %d\n", SIGTERM, pid);
 	if (pid) {
 		kill(pid, SIGTERM);	// terminate exec'ed child
+	}
+	if (rcSIPtoMODEM) {
+		RcFixed_Delete(rcSIPtoMODEM);
+		rcSIPtoMODEM = NULL;
+	}
+	if (rcMODEMtoSIP) {
+		RcFixed_Delete(rcMODEMtoSIP);
+		rcMODEMtoSIP = NULL;
 	}
 	pid = 0;
 	return 0;
@@ -724,8 +746,17 @@ struct modem_driver socket_modem_driver = {
 
 static int mdm_device_read(struct device_struct *dev, char *buf, int size)
 {
-	int ret = read(dev->fd, buf, size*2);
-	if (ret > 0) ret /= 2;
+	char readbuf[size*2];
+	int ret = read(dev->fd, readbuf, size*2);
+
+	if (rcSIPtoMODEM == NULL) {
+		return 0;
+	}
+
+	if (ret > 0) {
+		RcFixed_Resample(rcSIPtoMODEM, readbuf, ret/2, buf, &size);
+		ret = size;
+	}
 	return ret;
 }
 
@@ -733,16 +764,28 @@ static int mdm_device_write(struct device_struct *dev, const char *buf, int size
 {
 	struct modem_socket_frame modem_frame = { 0 };
 
-	if ((size * 2) < sizeof(((struct modem_socket_frame*)0)->buf)) {
+	if (rcMODEMtoSIP == NULL) {
+		return MODEM_FRAMESIZE;
+	}
+
+	if (size < MODEM_FRAMESIZE) {
 		return 0;
 	}
 
-	memcpy(modem_frame.buf, buf, sizeof(modem_frame.buf));
+	size = sizeof(modem_frame.buf)/2;
+	RcFixed_Resample(rcMODEMtoSIP, (char*)buf, MODEM_FRAMESIZE, (char*)modem_frame.buf, &size);
+	size *= 2;
+
+	if (size != sizeof(modem_frame.buf)) {
+		ERR("frame size doesn't match\n");
+		exit(EXIT_FAILURE);
+	}
+
 	modem_frame.volume = modem_volume;
 
 	int ret = write(dev->fd, &modem_frame, sizeof(modem_frame));
-	if (ret > 0 && ret != sizeof(modem_frame)) ERR("error writing!");
-	if (ret > 0) ret = sizeof(modem_frame.buf) / 2;
+	if (ret > 0 && ret != sizeof(modem_frame)) { ERR("error writing!"); exit(EXIT_FAILURE); }
+	if (ret > 0) ret = MODEM_FRAMESIZE;
 
 	return ret;
 }

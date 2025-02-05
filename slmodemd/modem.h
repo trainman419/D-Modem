@@ -99,6 +99,11 @@ enum MODEM_MODE {
 
 #define MODEM_CONFIG_RING_DETECTOR 1
 
+/* Clock and framesize for the PJSIP stack, 8khz, 20ms frames (G.711) */
+#define SIP_RATE 8000
+#define SIP_FRAMESIZE (SIP_RATE/(1000/20))
+
+
 /*
  *    type definitions
  *
@@ -115,7 +120,7 @@ struct modem_driver {
 
 /* socket frame definition */
 struct modem_socket_frame {
-	unsigned char buf[MODEM_FRAMESIZE * 2]; //16bit
+	unsigned char buf[SIP_FRAMESIZE * 2]; //16bit
 	int volume;
 };
 
