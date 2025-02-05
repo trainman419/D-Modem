@@ -290,7 +290,7 @@ int main(int argc, char *argv[]) {
 		if (pj_strcmp2(&codecs[i].codec_id,"PCMU/8000/1") == 0) {
 			pri = 1;
 		} else if (pj_strcmp2(&codecs[i].codec_id,"PCMA/8000/1") == 0) {
-			pri = 2;
+			pri = 1;
 		}
 		pjsua_codec_set_priority(&codecs[i].codec_id, pri);
 //		printf("codec: %s %d\n",pj_strbuf(&codecs[i].codec_id),pri);
