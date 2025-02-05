@@ -567,22 +567,21 @@ struct modem_driver alsa_modem_driver = {
 static int modemap_start (struct modem *m)
 {
 	struct device_struct *dev = m->dev_data;
+	struct modem_socket_frame modem_frame = { 0 };
 	int ret;
 	DBG("modemap_start...\n");
 	dev->delay = 0;
         ret = ioctl(dev->fd,100000+MDMCTL_START,0);
 	if (ret < 0)
 		return ret;
-	ret = MODEM_FRAMESIZE * 2;
-	memset(outbuf, 0 , ret);
-#if 0
-	ret = write(dev->fd, outbuf, ret);
-	if (ret < 0) {
+	modem_frame.volume = 0;
+	ret = write(dev->fd, &modem_frame, sizeof(modem_frame));
+	if (ret < sizeof(modem_frame)) {
+		if (ret > 0) ret = -1;
 		ioctl(dev->fd,100000+MDMCTL_STOP,0);
 		return ret;
 	}
-#endif
-	dev->delay = ret/2;
+	dev->delay = MODEM_FRAMESIZE;
 	return 0;
 }
 
@@ -620,6 +619,7 @@ struct modem_driver mdm_modem_driver = {
 static int socket_start (struct modem *m)
 {
 	struct device_struct *dev = m->dev_data;
+	struct modem_socket_frame modem_frame = { 0 };
 	int ret;
 	DBG("socket_start...\n");
 
@@ -650,16 +650,14 @@ static int socket_start (struct modem *m)
 		close(sockets[0]);
 		dev->fd = sockets[1];
 		dev->delay = 0;
-		ret = MODEM_FRAMESIZE * 2;
-		memset(outbuf, 0 , ret);
-#if 0
-		ret = write(dev->fd, outbuf, ret);
-#endif
+		modem_frame.volume = 0;
+		ret = write(dev->fd, &modem_frame, sizeof(modem_frame));
 		DBG("done delay thing\n");
-		if (ret < 0) {
-			return ret;
+		if (ret != sizeof(modem_frame)) {
+			perror("write");
+			exit(EXIT_FAILURE);
 		}
-		dev->delay = ret/2;
+		dev->delay = MODEM_FRAMESIZE;
 	}
 	return 0;
 }
