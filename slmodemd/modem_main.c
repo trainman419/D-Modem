@@ -675,7 +675,7 @@ static int socket_stop (struct modem *m)
 
 static int socket_ioctl(struct modem *m, unsigned int cmd, unsigned long arg)
 {
-	//struct device_struct *dev = m->dev_data;
+	struct device_struct *dev = m->dev_data;
 	int ret = 0;
 	DBG("socket_ioctl: cmd %x, arg %lx...\n",cmd,arg);
 	if (cmd == MDMCTL_SETFRAG)
@@ -686,10 +686,10 @@ static int socket_ioctl(struct modem *m, unsigned int cmd, unsigned long arg)
 		ret = -EINVAL;
 		break;
 	case MDMCTL_CODECTYPE:
-		ret = 4; // CODEC_STLC7550; XXX this worked fine as 0 (CODEC_UNKNOWN)...
+		ret = CODEC_AD1803; // CODEC_STLC7550; XXX this worked fine as 0 (CODEC_UNKNOWN)...
 		break;
 	case MDMCTL_IODELAY: // kernel module returns s->delay + ST7554_HW_IODELAY (48)
-		ret = 0;//48 >> MFMT_SHIFT(m->format);
+		ret = dev->delay;//48 >> MFMT_SHIFT(m->format);
 		//ret += dev->delay;
 		//DBG("%d %d %d %d",m->format,MFMT_SHIFT(m->format),dev->delay,ret);
 		break;
