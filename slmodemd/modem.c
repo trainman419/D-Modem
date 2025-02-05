@@ -1746,7 +1746,7 @@ static int sregs_init(unsigned char sregs[])
         sregs[SREG_VERBOSE]                      =    1; /* yes */
         sregs[SREG_TONE_OR_PULSE]                =    1; /* tone */
 
-        sregs[SREG_X_CODE]                       =    4;
+        sregs[SREG_X_CODE]                       =    3;
 
         sregs[SREG_SPEAKER_CONTROL] =  1; /* yes */
         sregs[SREG_SPEAKER_VOLUME]  =  3; /* max */
