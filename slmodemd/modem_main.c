@@ -567,21 +567,20 @@ struct modem_driver alsa_modem_driver = {
 static int modemap_start (struct modem *m)
 {
 	struct device_struct *dev = m->dev_data;
-	struct modem_socket_frame modem_frame = { 0 };
 	int ret;
 	DBG("modemap_start...\n");
 	dev->delay = 0;
         ret = ioctl(dev->fd,100000+MDMCTL_START,0);
 	if (ret < 0)
 		return ret;
-	modem_frame.volume = 0;
-	ret = write(dev->fd, &modem_frame, sizeof(modem_frame));
-	if (ret < sizeof(modem_frame)) {
-		if (ret > 0) ret = -1;
+	ret = MODEM_FRAMESIZE * 2;
+	memset(outbuf, 0 , ret);
+	ret = write(dev->fd, outbuf, ret);
+	if (ret < 0) {
 		ioctl(dev->fd,100000+MDMCTL_STOP,0);
 		return ret;
 	}
-	dev->delay = MODEM_FRAMESIZE;
+	dev->delay = ret/2;
 	return 0;
 }
 
