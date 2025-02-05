@@ -271,6 +271,8 @@ int main(int argc, char *argv[]) {
 //		med_cfg.jb_init = 200;
 #endif
 		med_cfg.audio_frame_ptime = 20;
+		med_cfg.has_ioqueue = true;
+		med_cfg.thread_cnt = 1;
 
 		status = pjsua_init(&cfg, &log_cfg, &med_cfg);
 		if (status != PJ_SUCCESS) error_exit("Error in pjsua_init()", status);
