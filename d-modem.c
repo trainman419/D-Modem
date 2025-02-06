@@ -270,7 +270,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	pjsua_set_ec(0,0); // maybe?
-	pjsua_set_null_snd_dev();
+	//pjsua_set_null_snd_dev();
 	
 	/* g711 only */
 	pjsua_codec_info codecs[32];
