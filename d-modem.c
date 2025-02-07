@@ -40,7 +40,9 @@ static bool destroying = false;
 static pj_pool_t *pool;
 
 static int volume = 0;
+#ifdef WITH_AUDIO
 static pjsua_conf_port_id left_audio_id, right_audio_id;
+#endif
 
 static void error_exit(const char *title, pj_status_t status) {
 	pjsua_perror(__FILE__, title, status);
@@ -119,8 +121,10 @@ static pj_status_t dmodem_get_frame(pjmedia_port *this_port, pjmedia_frame *fram
 							level = 1.0;
 							break;
 					}
+#ifdef WITH_AUDIO
 					pjsua_conf_adjust_tx_level(left_audio_id, level);
 					pjsua_conf_adjust_tx_level(right_audio_id, level);
+#endif
 					volume = socket_frame.data.volume.value;
 					printf("Volume: %d -> %f\n", volume, level);
 				}
@@ -184,6 +188,7 @@ static void on_call_media_state(pjsua_call_id call_id) {
 			//pjsua_conf_adjust_rx_level(port_id, 1.0);
 			//pjsua_conf_adjust_rx_level(ci.conf_slot, 1.0);
 
+#ifdef WITH_AUDIO
 			if (pjmedia_splitcomb_create(pool, SIP_RATE, 2, SIP_FRAMESIZE, 16, 0, &sc) != PJ_SUCCESS)
 				error_exit("can't create splitter/combiner",0);
 
@@ -210,6 +215,7 @@ static void on_call_media_state(pjsua_call_id call_id) {
 
 			if (pjmedia_snd_port_connect(audiodev, sc) != PJ_SUCCESS)
 				error_exit("can't connect audio device port",0);
+#endif
 
 			//Kick off audio
 			printf("Kicking off audio!\n");
@@ -294,7 +300,9 @@ int main(int argc, char *argv[]) {
 	}
 
 	pjsua_set_ec(0,0); // maybe?
-	//pjsua_set_null_snd_dev();
+#ifndef WITH_AUDIO
+	pjsua_set_null_snd_dev();
+#endif
 	
 	/* g711 only */
 	pjsua_codec_info codecs[32];
