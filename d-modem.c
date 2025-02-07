@@ -168,6 +168,7 @@ static void on_call_state(pjsua_call_id call_id, pjsip_event *e) {
 static void on_call_media_state(pjsua_call_id call_id) {
 	pjmedia_snd_port *audiodev;
 	pjmedia_port *sc, *left, *right;
+	pjmedia_aud_dev_index devidx = -1;
 	pjsua_call_info ci;
 	pjsua_conf_port_id port_id;
 	static int done=0;
@@ -210,7 +211,11 @@ static void on_call_media_state(pjsua_call_id call_id) {
 				error_exit("can't connect right port",0);
 			pjsua_conf_adjust_tx_level(right_audio_id, 0.0);
 
-			if (pjmedia_snd_port_create(pool, -1, -1, SIP_RATE, 2, SIP_FRAMESIZE, 16, 0, &audiodev) != PJ_SUCCESS)
+			if (pjmedia_aud_dev_lookup("ALSA", "default", &devidx) != PJ_SUCCESS) {
+				devidx = -1;
+			}
+
+			if (pjmedia_snd_port_create_player(pool, devidx, SIP_RATE, 2, SIP_FRAMESIZE, 16, 0, &audiodev) != PJ_SUCCESS)
 				error_exit("can't create audio device port",0);
 
 			if (pjmedia_snd_port_connect(audiodev, sc) != PJ_SUCCESS)
@@ -300,9 +305,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	pjsua_set_ec(0,0); // maybe?
-#ifndef WITH_AUDIO
 	pjsua_set_null_snd_dev();
-#endif
 	
 	/* g711 only */
 	pjsua_codec_info codecs[32];
