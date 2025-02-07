@@ -53,10 +53,22 @@ static void error_exit(const char *title, pj_status_t status) {
 
 static pj_status_t dmodem_put_frame(pjmedia_port *this_port, pjmedia_frame *frame) {
 	struct dmodem *sm = (struct dmodem *)this_port;
+	struct socket_frame socket_frame = { 0 };
 	int len;
 
+	if (frame->size == 0) {
+		return PJ_SUCCESS;
+	}
+
+	if (frame->size != sizeof(socket_frame.data.audio.buf)) {
+		return PJSIP_EINVALIDMSG;
+	}
+
 	if (frame->type == PJMEDIA_FRAME_TYPE_AUDIO) {
-		if ((len=write(sm->sock, frame->buf, frame->size)) != frame->size) {
+		memcpy(socket_frame.data.audio.buf, frame->buf, frame->size);
+		socket_frame.type = SOCKET_FRAME_AUDIO;
+
+		if ((len=write(sm->sock, &socket_frame, sizeof(socket_frame))) != sizeof(socket_frame)) {
 			error_exit("error writing frame",0);
 		}
 	}
@@ -66,7 +78,7 @@ static pj_status_t dmodem_put_frame(pjmedia_port *this_port, pjmedia_frame *fram
 
 static pj_status_t dmodem_get_frame(pjmedia_port *this_port, pjmedia_frame *frame) {
 	struct dmodem *sm = (struct dmodem *)this_port;
-	struct modem_socket_frame modem_frame = { 0 };
+	struct socket_frame socket_frame = { 0 };
 
 	frame->size = PJMEDIA_PIA_MAX_FSZ(&this_port->info);
 	if (frame->size != SIP_FRAMESIZE * 2) {
@@ -74,41 +86,52 @@ static pj_status_t dmodem_get_frame(pjmedia_port *this_port, pjmedia_frame *fram
 		exit(EXIT_FAILURE);
 	}
 
-	int len;
-	if ((len=read(sm->sock, &modem_frame, sizeof(modem_frame))) != sizeof(modem_frame)) {
-		error_exit("error reading frame",0);
-	}
-
-	len = frame->size;
-	memcpy(frame->buf, modem_frame.buf, len);
-	if (modem_frame.volume != volume) {
-		float level = 0.0;
-		switch (modem_frame.volume) {
-			case 0:
-				level = 0.0;
-				break;
-			case 1:
-				level = 1.0/3.0;
-				break;
-			case 2:
-				level = 2.0/3.0;
-				break;
-			case 3:
-			default:
-				level = 1.0;
-				break;
+	while(1) {
+		int len;
+		if ((len=read(sm->sock, &socket_frame, sizeof(socket_frame))) != sizeof(socket_frame)) {
+			error_exit("error reading frame",0);
 		}
-		printf("Volume: %d -> %f\n", modem_frame.volume, level);
-		pjsua_conf_adjust_tx_level(left_audio_id, level);
-		pjsua_conf_adjust_tx_level(right_audio_id, level);
-		volume = modem_frame.volume;
+
+		switch(socket_frame.type) {
+			case SOCKET_FRAME_AUDIO:
+				len = frame->size;
+				memcpy(frame->buf, socket_frame.data.audio.buf, len);
+				frame->timestamp.u64 = sm->timestamp.u64;
+				frame->type = PJMEDIA_FRAME_TYPE_AUDIO;
+				sm->timestamp.u64 += PJMEDIA_PIA_PTIME(&this_port->info);
+				return PJ_SUCCESS;
+				break;
+			case SOCKET_FRAME_VOLUME:
+				if (socket_frame.data.volume.value != volume) {
+					float level = 0.0;
+					switch (socket_frame.data.volume.value) {
+						case 0:
+							level = 0.0;
+							break;
+						case 1:
+							level = 1.0/3.0;
+							break;
+						case 2:
+							level = 2.0/3.0;
+							break;
+						case 3:
+						default:
+							level = 1.0;
+							break;
+					}
+					pjsua_conf_adjust_tx_level(left_audio_id, level);
+					pjsua_conf_adjust_tx_level(right_audio_id, level);
+					volume = socket_frame.data.volume.value;
+					printf("Volume: %d -> %f\n", volume, level);
+				}
+				break;
+			default:
+				error_exit("Invalid frame received!", 0);
+		}
 	}
 
-	frame->timestamp.u64 = sm->timestamp.u64;
-	frame->type = PJMEDIA_FRAME_TYPE_AUDIO;
-	sm->timestamp.u64 += PJMEDIA_PIA_PTIME(&this_port->info);
-
-	return PJ_SUCCESS;
+	exit(1);
+	return PJSIP_EINVALIDMSG;
 }
 
 static pj_status_t dmodem_on_destroy(pjmedia_port *this_port) {
@@ -150,6 +173,7 @@ static void on_call_media_state(pjsua_call_id call_id) {
 //	printf("media_status %d media_cnt %d ci.conf_slot %d aud.conf_slot %d\n",ci.media_status,ci.media_cnt,ci.conf_slot,ci.media[0].stream.aud.conf_slot);
 	if (ci.media_status == PJSUA_CALL_MEDIA_ACTIVE) {
 		if (!done) {
+			struct socket_frame socket_frame = { 0 };
 			if (pjsua_conf_add_port(pool, &port.base, &port_id) != PJ_SUCCESS)
 				error_exit("can't add modem port",0);
 			if (pjsua_conf_connect(ci.conf_slot, port_id) != PJ_SUCCESS)
@@ -183,14 +207,14 @@ static void on_call_media_state(pjsua_call_id call_id) {
 
 			if (pjmedia_snd_port_create(pool, -1, -1, SIP_RATE, 2, SIP_FRAMESIZE, 16, 0, &audiodev) != PJ_SUCCESS)
 				error_exit("can't create audio device port",0);
+
 			if (pjmedia_snd_port_connect(audiodev, sc) != PJ_SUCCESS)
 				error_exit("can't connect audio device port",0);
 
 			//Kick off audio
 			printf("Kicking off audio!\n");
-			char buf[SIP_FRAMESIZE*2];
-			memset(buf,0,sizeof(buf));
-			write(port.sock, buf, sizeof(buf));
+			socket_frame.type = SOCKET_FRAME_AUDIO;
+			write(port.sock, &socket_frame, sizeof(socket_frame));
 
 			done = 1;
 		}

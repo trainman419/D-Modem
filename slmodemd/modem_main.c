@@ -626,7 +626,7 @@ struct modem_driver mdm_modem_driver = {
 static int socket_start (struct modem *m)
 {
 	struct device_struct *dev = m->dev_data;
-	struct modem_socket_frame modem_frame = { 0 };
+	struct socket_frame socket_frame = { 0 };
 	int ret;
 	DBG("socket_start...\n");
 
@@ -657,14 +657,23 @@ static int socket_start (struct modem *m)
 		close(sockets[0]);
 		dev->fd = sockets[1];
 		dev->delay = 0;
-		modem_frame.volume = 0;
-		ret = write(dev->fd, &modem_frame, sizeof(modem_frame));
-		DBG("done delay thing\n");
-		if (ret != sizeof(modem_frame)) {
+		socket_frame.type = SOCKET_FRAME_AUDIO;
+		ret = write(dev->fd, &socket_frame, sizeof(socket_frame));
+		if (ret != sizeof(socket_frame)) {
 			perror("write");
 			exit(EXIT_FAILURE);
 		}
 		dev->delay = MODEM_FRAMESIZE;
+		DBG("done delay thing\n");
+
+		socket_frame.type = SOCKET_FRAME_VOLUME;
+		socket_frame.data.volume.value = modem_volume;
+		ret = write(dev->fd, &socket_frame, sizeof(socket_frame));
+		if (ret != sizeof(socket_frame)) {
+			perror("write");
+			exit(EXIT_FAILURE);
+		}
+
 		rcSIPtoMODEM = RcFixed_Create(2);
 		rcMODEMtoSIP = RcFixed_Create(3);
 		if (rcSIPtoMODEM == NULL || rcMODEMtoSIP == NULL) {
@@ -717,6 +726,16 @@ static int socket_ioctl(struct modem *m, unsigned int cmd, unsigned long arg)
 		break;
 	case MDMCTL_SPEAKERVOL:
 		modem_volume = arg;
+		if (pid) {
+			struct socket_frame socket_frame = { 0 };
+
+			socket_frame.type = SOCKET_FRAME_VOLUME;
+			socket_frame.data.volume.value = arg;
+			ret = write(dev->fd, &socket_frame, sizeof(socket_frame));
+			if (ret != sizeof(socket_frame)) {
+				perror("write");
+			}
+		}
 		ret = 0;
 		break;
 	case MDMCTL_HOOKSTATE: // 0 = on, 1 = off
@@ -746,23 +765,45 @@ struct modem_driver socket_modem_driver = {
 
 static int mdm_device_read(struct device_struct *dev, char *buf, int size)
 {
-	char readbuf[size*2];
-	int ret = read(dev->fd, readbuf, size*2);
+	struct socket_frame socket_frame = { 0 };
 
-	if (rcSIPtoMODEM == NULL) {
+	if (size < MODEM_FRAMESIZE) {
 		return 0;
 	}
 
-	if (ret > 0) {
-		RcFixed_Resample(rcSIPtoMODEM, readbuf, ret/2, buf, &size);
-		ret = size;
+	while(1) {
+		int ret = read(dev->fd, &socket_frame, sizeof(socket_frame));
+
+		if (ret < 0) {
+			return ret;
+		}
+
+		if (ret != sizeof(socket_frame)) {
+			ERR("frame size doesn't match %d - %d\n", ret, sizeof(socket_frame));
+			exit(EXIT_FAILURE);
+		}
+
+		switch (socket_frame.type) {
+			case SOCKET_FRAME_AUDIO:
+				if (rcSIPtoMODEM == NULL) {
+					return 0;
+				}
+
+				RcFixed_Resample(rcSIPtoMODEM, socket_frame.data.audio.buf, sizeof(socket_frame.data.audio.buf)/2, buf, &size);
+				return size;
+				break;
+			default:
+				ERR("invalid frame received!\n");
+				break;
+		}
 	}
-	return ret;
+
+	return 0;
 }
 
 static int mdm_device_write(struct device_struct *dev, const char *buf, int size)
 {
-	struct modem_socket_frame modem_frame = { 0 };
+	struct socket_frame socket_frame = { 0 };
 
 	if (rcMODEMtoSIP == NULL) {
 		return MODEM_FRAMESIZE;
@@ -772,19 +813,18 @@ static int mdm_device_write(struct device_struct *dev, const char *buf, int size
 		return 0;
 	}
 
-	size = sizeof(modem_frame.buf)/2;
-	RcFixed_Resample(rcMODEMtoSIP, (char*)buf, MODEM_FRAMESIZE, (char*)modem_frame.buf, &size);
+	socket_frame.type = SOCKET_FRAME_AUDIO;
+	size = sizeof(socket_frame.data.audio.buf)/2;
+	RcFixed_Resample(rcMODEMtoSIP, (char*)buf, MODEM_FRAMESIZE, socket_frame.data.audio.buf, &size);
 	size *= 2;
 
-	if (size != sizeof(modem_frame.buf)) {
-		ERR("frame size doesn't match\n");
+	if (size != sizeof(socket_frame.data.audio.buf)) {
+		ERR("frame buffer size doesn't match\n");
 		exit(EXIT_FAILURE);
 	}
 
-	modem_frame.volume = modem_volume;
-
-	int ret = write(dev->fd, &modem_frame, sizeof(modem_frame));
-	if (ret > 0 && ret != sizeof(modem_frame)) { ERR("error writing!"); exit(EXIT_FAILURE); }
+	int ret = write(dev->fd, &socket_frame, sizeof(socket_frame));
+	if (ret > 0 && ret != sizeof(socket_frame)) { ERR("error writing!"); exit(EXIT_FAILURE); }
 	if (ret > 0) ret = MODEM_FRAMESIZE;
 
 	return ret;

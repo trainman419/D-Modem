@@ -119,10 +119,28 @@ struct modem_driver {
 };
 
 /* socket frame definition */
-struct modem_socket_frame {
-	unsigned char buf[SIP_FRAMESIZE * 2]; //16bit
-	int volume;
+enum socket_frame_types {
+	SOCKET_FRAME_AUDIO,
+	SOCKET_FRAME_VOLUME,
 };
+
+struct socket_frame_audio {
+	char buf[SIP_FRAMESIZE * 2]; //16bit
+};
+
+struct socket_frame_volume {
+	int value;
+};
+
+struct socket_frame {
+	enum socket_frame_types type;
+	union {
+		struct socket_frame_audio audio;
+		struct socket_frame_volume volume;
+
+	} data;
+};
+
 
 /* modem data pumps driver struct */
 struct dp_driver {
