@@ -215,11 +215,12 @@ static void on_call_media_state(pjsua_call_id call_id) {
 				devidx = -1;
 			}
 
-			if (pjmedia_snd_port_create_player(pool, devidx, SIP_RATE, 2, SIP_FRAMESIZE, 16, 0, &audiodev) != PJ_SUCCESS)
-				error_exit("can't create audio device port",0);
-
-			if (pjmedia_snd_port_connect(audiodev, sc) != PJ_SUCCESS)
-				error_exit("can't connect audio device port",0);
+			if (pjmedia_snd_port_create_player(pool, devidx, SIP_RATE, 2, SIP_FRAMESIZE, 16, 0, &audiodev) == PJ_SUCCESS) {
+				if (pjmedia_snd_port_connect(audiodev, sc) != PJ_SUCCESS)
+					error_exit("can't connect audio device port",0);
+			} else {
+				pjsua_perror(__FILE__,"can't create audio device port",0);
+			}
 #endif
 
 			//Kick off audio
