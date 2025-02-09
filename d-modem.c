@@ -105,21 +105,9 @@ static pj_status_t dmodem_get_frame(pjmedia_port *this_port, pjmedia_frame *fram
 				break;
 			case SOCKET_FRAME_VOLUME:
 				if (socket_frame.data.volume.value != volume) {
-					float level = 0.0;
-					switch (socket_frame.data.volume.value) {
-						case 0:
-							level = 0.0;
-							break;
-						case 1:
-							level = 1.0/3.0;
-							break;
-						case 2:
-							level = 2.0/3.0;
-							break;
-						case 3:
-						default:
-							level = 1.0;
-							break;
+					float level = 1.0;
+					if (socket_frame.data.volume.value >=0 && socket_frame.data.volume.value <= 3) {
+						level = socket_frame.data.volume.value / 3.0;
 					}
 #ifdef WITH_AUDIO
 					pjsua_conf_adjust_tx_level(left_audio_id, level);
