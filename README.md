@@ -20,7 +20,7 @@ d-modem – External application that interfaces with slmodemd to manage SIP cal
 
 socat.sh - Script that invokes Socat, connecting 2 modems together and transferring data between them via TCP relay (see [Testing](#testing)).
 
-After they have been built, you will need to configure SIP account information in the SIP_LOGIN environment variable: 
+After they have been built, you can configure SIP account information in the SIP_LOGIN environment variable for calls over a SIP proxy:
 
     # export SIP_LOGIN=username:password@sip.example.com
 Next, run slmodemd, passing the path to d-modem in the -e option.  Use -d<level> for debug logging. 
@@ -57,6 +57,12 @@ Finally, dial the number of the target system.  Below shows a connection to the 
     59515 21-10-28 21:40:21 11 0 -.1 045.0 UTC(NIST) * 
     59515 21-10-28 21:40:22 11 0 -.1 045.0 UTC(NIST) * 
     59515 21-10-28 21:40:23 11 0 -.1 045.0 UTC(NIST) *
+
+If you want to initiate a direct call to a SIP endpoint without credentials, use `ATDTendpoint@sip.domain`:
+
+    ATDT1234@192.168.0.1
+    CONNECT 37333
+    Login:
 
 ## Testing
 Install multipurpose relay Socat and Minicom.

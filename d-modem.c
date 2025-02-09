@@ -235,7 +235,11 @@ static void sig_handler(int sig, siginfo_t *si, void *x) {
 
 int main(int argc, char *argv[]) {
 	pjsua_acc_id acc_id;
+	pjsua_transport_id transport;
 	pj_status_t status;
+	char *sip_domain = NULL;
+	char *sip_pass = NULL;
+	int direct_call = 1;
 
 	if (argc != 3) {
 		return -1;
@@ -247,18 +251,31 @@ int main(int argc, char *argv[]) {
 
 	char *sip_user = getenv("SIP_LOGIN");
 	if (!sip_user) {
-		return -1;
+		printf("No SIP_LOGIN not defined, continuing with direct SIP calls.\n");
+		printf("Use `ATDTendpoint@sip.domain' for calls\n");
+	} else {
+		sip_domain = strchr(sip_user,'@');
+		if (!sip_domain) {
+			fprintf(stderr, "Can't find SIP domain in SIP_LOGN!\n");
+			exit(EXIT_FAILURE);
+		}
+		*sip_domain++ = '\0';
+		sip_pass = strchr(sip_user,':');
+		if (!sip_pass) {
+			fprintf(stderr, "Can't find SIP password in SIP_LOGN!\n");
+			exit(EXIT_FAILURE);
+		}
+		*sip_pass++ = '\0';
+		direct_call = 0;
 	}
-	char *sip_domain = strchr(sip_user,'@');
-	if (!sip_domain) {
-		return -1;
+
+	if (strchr(dialstr, '@')) {
+		printf("Found '@' in %s, continuing with direct call\n", dialstr);
+		direct_call = 1;
+	} else if (direct_call == 1) {
+		fprintf(stderr, "No SIP credentials and not a direct call: %s\n", dialstr);
+		exit(EXIT_FAILURE);
 	}
-	*sip_domain++ = '\0';
-	char *sip_pass = strchr(sip_user,':');
-	if (!sip_pass) {
-		return -1;
-	}
-	*sip_pass++ = '\0';
 
 	status = pjsua_create();
 	if (status != PJ_SUCCESS) error_exit("Error in pjsua_create()", status);
@@ -317,7 +334,7 @@ int main(int argc, char *argv[]) {
 
 		pjsua_transport_config_default(&cfg);
 		cfg.port = 0;
-		status = pjsua_transport_create(PJSIP_TRANSPORT_UDP, &cfg, NULL);
+		status = pjsua_transport_create(PJSIP_TRANSPORT_UDP, &cfg, &transport);
 		if (status != PJ_SUCCESS) error_exit("Error creating transport", status);
 	}
 
@@ -340,7 +357,7 @@ int main(int argc, char *argv[]) {
 	status = pjsua_start();
 	if (status != PJ_SUCCESS) error_exit("Error starting pjsua", status);
 
-	{
+	if (!direct_call) {
 		pjsua_acc_config cfg;
 		pjsua_acc_config_default(&cfg);
 		snprintf(buf,sizeof(buf),"sip:%s@%s",sip_user,sip_domain);
@@ -358,6 +375,15 @@ int main(int argc, char *argv[]) {
 
 		status = pjsua_acc_add(&cfg, PJ_TRUE, &acc_id);
 		if (status != PJ_SUCCESS) error_exit("Error adding account", status);
+	} else {
+		pjsua_acc_config cfg;
+		status = pjsua_acc_add_local(transport, PJ_TRUE, &acc_id);
+		if (status != PJ_SUCCESS) error_exit("Error adding account", status);
+		if ((status = pjsua_acc_get_config(acc_id, pool, &cfg)) != PJ_SUCCESS)
+			error_exit("Error getting local account config", status);
+		cfg.rtp_cfg.port = 0;
+		if ((status = pjsua_acc_modify(acc_id, &cfg)) != PJ_SUCCESS)
+			error_exit("Error modifying local account config", status);
 	}
 
 	char *dial = dialstr;
@@ -367,7 +393,11 @@ int main(int argc, char *argv[]) {
 		dial++;
 	}
 
-	snprintf(buf,sizeof(buf),"sip:%s@%s",dial,sip_domain);
+	if (!direct_call) {
+		snprintf(buf,sizeof(buf),"sip:%s@%s",dial,sip_domain);
+	} else {
+		snprintf(buf,sizeof(buf),"sip:%s",dial);
+	}
 	printf("calling %s\n",buf);
 	pj_str_t uri = pj_str(buf);
 
