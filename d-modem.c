@@ -360,6 +360,7 @@ int main(int argc, char *argv[]) {
 		snprintf(buf,sizeof(buf),"sip:%s",sip_domain);
 		pj_strdup2(pool,&cfg.reg_uri,buf);
 		cfg.register_on_acc_add = false;
+		cfg.rtp_cfg.port = 0;
 		cfg.cred_count = 1;
 		cfg.cred_info[0].realm = pj_str("*");
 		cfg.cred_info[0].scheme = pj_str("digest");
