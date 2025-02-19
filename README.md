@@ -102,7 +102,6 @@ To stop data transmission, first escape from on-line mode (+++), then hang up:
     ath
 
 ## Known Issues / Future Work
-- Connections are unreliable, and it is currently difficult to connect at speeds higher than 14.4kbps or so.  It might be possible to improve this by disabling/reconfiguring PJSIP’s jitter buffer. 
 - Additional logging/error handling is needed 
 - The serial interface could be replaced with stdio or a socket, and common AT configuration options could be exposed as command line options 
 - There is currently no support for receiving calls in d-modem.
