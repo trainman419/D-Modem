@@ -37,7 +37,7 @@ In another terminal, connect to the newly created serial device at 115200 bps:
 
 You can now interact with this terminal (almost) as you would with a normal modem using standard AT commands.  A similar modem’s manual provides a more complete list. 
 
-To successfully connect, you might need to manually select a modulation and data rate.  In our testing, V.32bis (14.4kbps) and below appears to be the most reliable, though V.34 (33.6kbps) and V.90 (at least 37.33kbps up to possibly 56k) connections are sometimes successful.  For example, the following command selects V.32bis with a data rate of 4800 – 9600 bps.  Refer to [the manual](./doc/ST56ATCommands.pdf) for further details. 
+To successfully connect, you might need to manually select a modulation and data rate.  In our testing, V.32bis (14.4kbps) and below might be more reliable, though V.34 (up to 33.6kbps) and V.90 (up to 56k) connections are usually successful.  For example, the following command selects V.32bis with a data rate of 4800 – 9600 bps.  Refer to [the manual](./doc/ST56ATCommands.pdf) for further details. 
 
     at+ms=132,0,4800,9600 
     OK
