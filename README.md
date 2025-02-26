@@ -3,6 +3,17 @@ Connect to dialup modems over VoIP using SIP, no modem hardware required.
 
 https://www.aon.com/cyber-solutions/aon_cyber_labs/introducing-d-modem-a-software-sip-modem/
 
+## Changes in this fork
+
+ - Increased data rates up to full 56k (tested with Cisco 2951 with PVDM2 digital modems and clock synced to GPS using [icE1usb](https://osmocom.org/projects/e1-t1-adapter/wiki/IcE1usb) at the other end, direct SIP between D-Modem and Cisco)
+ - Highly improved connection stability (connections lasting days instead of minutes)
+ - Audio output of modem tones using the PJSIP audio output
+ - Anonymous calls without credentials
+ - RTP- and SIP-ports randomized, allowing multiple instances on the same system
+ - `ATX3` (no dialtone required) is the default
+ - Running as non-root directly supported (and encouraged!)
+ - Various bug fixes
+
 ## Building
 You'll need Linux and a working 32-bit development environment (gcc -m32 needs to work, Debian-based systems can install: libc6-dev-i386 gcc-multilib), along with PJSIP's dependencies (OpenSSL).  Then run 'make' from the top-level directory.
 
