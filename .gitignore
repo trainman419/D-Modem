@@ -5,3 +5,8 @@ slmodemd/.build_profile
 d-modem
 slmodemd
 modem_test
+.vscode/launch.json
+libc.so.6
+.vscode/settings.json
+.gitignore
+.vscode/tasks.json

@@ -35,6 +35,8 @@ struct dmodem {
 	pj_sock_t sock;
 };
 
+extern int  modem_send_to_tty(struct modem *m, const char *buf, int n);
+
 static struct dmodem port;
 static bool destroying = false;
 static pj_pool_t *pool;
@@ -142,15 +144,22 @@ static void on_call_state(pjsua_call_id call_id, pjsip_event *e) {
 				(int)ci.state_text.slen,
 				ci.state_text.ptr));
 
-	if (ci.state == PJSIP_INV_STATE_DISCONNECTED) {
-		close(port.sock);
-		if (!destroying) {
-			destroying = true;
-			pjsua_destroy();
-			exit(0);
-		}
+	if (ci.state ==PJSIP_INV_STATE_DISCONNECTED) {
+
 	}
+
+	//if (ci.state == PJSIP_INV_STATE_DISCONNECTED) {
+	//	close(port.sock);
+	//	if (!destroying) {
+	//		destroying = true;
+	//		pjsua_destroy();
+	//		exit(0);
+	//	}
+	//}
 }
+
+
+
 
 /* Callback called by the library when call's media state has changed */
 static void on_call_media_state(pjsua_call_id call_id) {
@@ -160,7 +169,7 @@ static void on_call_media_state(pjsua_call_id call_id) {
 	pjsua_call_info ci;
 	pjsua_conf_port_id port_id;
 	static int done=0;
-
+	
 	pjsua_call_get_info(call_id, &ci);
 
 //	printf("media_status %d media_cnt %d ci.conf_slot %d aud.conf_slot %d\n",ci.media_status,ci.media_cnt,ci.conf_slot,ci.media[0].stream.aud.conf_slot);
@@ -220,6 +229,37 @@ static void on_call_media_state(pjsua_call_id call_id) {
 		}
 	}
 }
+
+/* Callback called by the library upon receiving incoming call */
+static void on_incoming_call(pjsua_acc_id acc_id, pjsua_call_id call_id,
+                             pjsip_rx_data *rdata)
+{
+    pjsua_call_info inci;
+	pjsua_conf_port_id port_id;
+
+    PJ_UNUSED_ARG(acc_id);
+    PJ_UNUSED_ARG(rdata);
+
+    pjsua_call_get_info(call_id, &inci);
+	printf("RING!\n");
+	printf("Incoming call from %.*s\n",(int)inci.remote_info.slen,
+                         inci.remote_info.ptr);
+
+    PJ_LOG(3,(__FILE__, "Incoming call from %.*s!!",
+                         (int)inci.remote_info.slen,
+                         inci.remote_info.ptr));
+	
+	modem_send_to_tty(m,"RING",4);	
+
+    /* Automatically answer incoming calls with 200/OK */
+    pjsua_call_answer(call_id, 200, NULL, NULL);
+	pjsua_conf_add_port(pool, &port.base, &port_id);
+	pjsua_conf_connect(inci.conf_slot, port_id);
+	pjsua_conf_connect(port_id, inci.conf_slot);
+
+}
+
+
 
 static void sig_handler(int sig, siginfo_t *si, void *x) {
 	switch(sig) {
@@ -364,7 +404,7 @@ int main(int argc, char *argv[]) {
 		pj_strdup2(pool,&cfg.id,buf);
 		snprintf(buf,sizeof(buf),"sip:%s",sip_domain);
 		pj_strdup2(pool,&cfg.reg_uri,buf);
-		cfg.register_on_acc_add = false;
+		cfg.register_on_acc_add = true;
 		cfg.rtp_cfg.port = 0;
 		cfg.cred_count = 1;
 		cfg.cred_info[0].realm = pj_str("*");
@@ -387,6 +427,43 @@ int main(int argc, char *argv[]) {
 	}
 
 	char *dial = dialstr;
+
+	
+	printf("dial = `%s` \n",dial);
+    printf("dialstr = `%s` \n",dialstr);
+	//dial string empty. wait for incoming call?
+	if (!dial[0])
+	{
+		printf("Empty Dial String. should play silence waiting for call\n");
+		
+		//set up conference bridge
+
+		pjmedia_snd_port *audiodev;
+		pjmedia_port *sc, *left, *right;
+		pjmedia_aud_dev_index devidx = -1;
+		pjsua_call_info empty_ci;
+		pjsua_conf_port_id empty_port_id;
+
+		struct socket_frame socket_frame = { 0 };
+			if (pjsua_conf_add_port(pool, &port.base, &empty_port_id) != PJ_SUCCESS)
+				error_exit("can't add modem port",0);
+			if (pjsua_conf_connect(empty_ci.conf_slot, empty_port_id) != PJ_SUCCESS)
+				error_exit("can't connect modem port (out)",0);
+			if (pjsua_conf_connect(empty_port_id, empty_ci.conf_slot) != PJ_SUCCESS)
+				error_exit("can't connect modem port (in)",0);
+
+			//pjsua_conf_adjust_rx_level(port_id, 1.0);
+			//pjsua_conf_adjust_rx_level(ci.conf_slot, 1.0);
+			if (pjmedia_splitcomb_create(pool, SIP_RATE, 2, SIP_FRAMESIZE, 16, 0, &sc) != PJ_SUCCESS)
+				error_exit("can't create splitter/combiner",0);
+			printf("Kicking off audio!\n");
+			socket_frame.type = SOCKET_FRAME_AUDIO;
+			write(port.sock, &socket_frame, sizeof(socket_frame));			
+
+		
+	}
+
+
 	//handle atdt and atdp
 	if (dial[0] == 't' || dial[0] == 'T' ||
 	    dial[0] == 'p' || dial[0] == 'P') {
@@ -409,10 +486,13 @@ int main(int argc, char *argv[]) {
 
 	printf("Dialer PID: %d\n", getpid());
 
+	
+	if (dial[0]){
 	pjsua_call_id callid;
+	
 	status = pjsua_call_make_call(acc_id, &uri, 0, NULL, NULL, &callid);
 	if (status != PJ_SUCCESS) error_exit("Error making call", status);
-
+	}
 	struct timespec ts = {100, 0};
 	while(1) {
 		nanosleep(&ts,NULL);

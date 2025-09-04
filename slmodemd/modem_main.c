@@ -627,6 +627,8 @@ static int socket_start (struct modem *m)
 {
 	struct device_struct *dev = m->dev_data;
 	struct socket_frame socket_frame = { 0 };
+
+
 	int ret;
 	DBG("socket_start...\n");
 
