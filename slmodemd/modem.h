@@ -122,6 +122,7 @@ struct modem_driver {
 enum socket_frame_types {
 	SOCKET_FRAME_AUDIO,
 	SOCKET_FRAME_VOLUME,
+	SOCKET_FRAME_SIP_INFO
 };
 
 struct socket_frame_audio {
@@ -132,14 +133,22 @@ struct socket_frame_volume {
 	int value;
 };
 
+struct socket_frame_sip_info {
+	char *cid; //caller id
+	char *sipstate; //sip state (ringing,calling,incall)
+	int registered; //sip registration state
+	int modem_hook_state; //modem hook state
+};
+
 struct socket_frame {
 	enum socket_frame_types type;
 	union {
 		struct socket_frame_audio audio;
 		struct socket_frame_volume volume;
-
+		struct socket_frame_sip_info sipinfo;
 	} data;
 };
+
 
 
 /* modem data pumps driver struct */

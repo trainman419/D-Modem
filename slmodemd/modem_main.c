@@ -136,6 +136,7 @@ struct device_struct {
 	unsigned int started;
 #endif
 	int delay;
+	int sipfd;
 };
 
 
@@ -144,6 +145,7 @@ static char outbuf[4096];
 
 static pid_t pid = 0;
 static int modem_volume = 0;
+static int sip_modem_hookstate = 0;
 static void *rcSIPtoMODEM = NULL;
 static void *rcMODEMtoSIP = NULL;
 
@@ -623,43 +625,67 @@ struct modem_driver mdm_modem_driver = {
         .ioctl = modemap_ioctl,
 };
 
+//init socket
 static int socket_start (struct modem *m)
 {
 	struct device_struct *dev = m->dev_data;
 	struct socket_frame socket_frame = { 0 };
-
+	struct socket_frame sip_socket_frame = { 0 };
 
 	int ret;
 	DBG("socket_start...\n");
 
 	int sockets[2];
 
+	int sip_sockets[2];
+
+	//socket for call audio
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == -1) {
 		perror("socketpair");
 		exit(-1);
 	}
-
+	//socket for call info
+	if (socketpair(AF_UNIX, SOCK_STREAM, 0, sip_sockets) == -1) {
+		perror("socketpair");
+		exit(-1);
+	}
+	
+	//fork
 	pid = fork();
 	if (pid == -1) {
 		perror("fork");
 		exit(-1);
 	}
 	if (pid == 0) { // child
+		//call audio socket
 		char str[16];
 		snprintf(str,sizeof(str),"%d",sockets[0]);
 		close(sockets[1]);
-
-		ret = execl(modem_exec,modem_exec,m->dial_string,str,NULL);
+		
+		//call info socket
+		char sipstr[16];
+		snprintf(sipstr,sizeof(sipstr),"%d",sip_sockets[0]);
+		close(sip_sockets[1]);
+		
+		//exec -e modem_exec
+		ret = execl(modem_exec,modem_exec,m->dial_string,str,sipstr,NULL);
 		if (ret == -1) {
 			ERR("prog: %s\n", modem_exec);
 			perror("execl");
 			exit(-1);
 		}
 	} else {
+		//close child socket on modem end so child can use it
 		close(sockets[0]);
+		close(sip_sockets[0]);
+
+		//set fd
 		dev->fd = sockets[1];
+		dev->sipfd = sip_sockets[1];
 		dev->delay = 0;
 		socket_frame.type = SOCKET_FRAME_AUDIO;
+		sip_socket_frame.type = SOCKET_FRAME_SIP_INFO;
+
 		ret = write(dev->fd, &socket_frame, sizeof(socket_frame));
 		if (ret != sizeof(socket_frame)) {
 			perror("write");
@@ -676,6 +702,15 @@ static int socket_start (struct modem *m)
 			exit(EXIT_FAILURE);
 		}
 
+		sip_socket_frame.data.sipinfo.cid = "";
+		sip_socket_frame.data.sipinfo.modem_hook_state = 0;
+		sip_socket_frame.data.sipinfo.registered = 0;
+		sip_socket_frame.data.sipinfo.sipstate = "";
+		ret = write(dev->sipfd, &sip_socket_frame, sizeof(sip_socket_frame));
+		if (ret != sizeof(socket_frame)) {
+			perror("write");
+			exit(EXIT_FAILURE);
+		}
 		rcSIPtoMODEM = RcFixed_Create(2);
 		rcMODEMtoSIP = RcFixed_Create(3);
 		if (rcSIPtoMODEM == NULL || rcMODEMtoSIP == NULL) {
@@ -683,6 +718,27 @@ static int socket_start (struct modem *m)
 			exit(EXIT_FAILURE);
 		}
 	}
+	return 0;
+}
+
+//this is what the modem calls to dial out/init the modem
+//send cid in socket
+static int socket_dial (struct modem *m)
+{
+	struct device_struct *dev = m->dev_data;
+	struct socket_frame sip_socket_frame = { 0 };
+	
+	int ret;
+	DBG("dial_start...\n");
+	DBG("Dialling %s...\n",m->dial_string);
+
+	sip_socket_frame.type = SOCKET_FRAME_SIP_INFO;
+	sip_socket_frame.data.sipinfo.cid = m->dial_string;
+	ret = write(dev->fd, &sip_socket_frame, sizeof(sip_socket_frame));
+	if (ret != sizeof(sip_socket_frame)) {
+		perror("write");
+		}
+	DBG("wrote m->dialstring to socket\n");
 	return 0;
 }
 
@@ -703,6 +759,14 @@ static int socket_stop (struct modem *m)
 		rcMODEMtoSIP = NULL;
 	}
 	pid = 0;
+	return 0;
+}
+
+static int socket_hangup (struct modem *m)
+{
+	struct device_struct *dev = m->dev_data;
+	DBG("hangup / close socket !not implemented! ...\n");
+
 	return 0;
 }
 
@@ -741,6 +805,21 @@ static int socket_ioctl(struct modem *m, unsigned int cmd, unsigned long arg)
 		ret = 0;
 		break;
 	case MDMCTL_HOOKSTATE: // 0 = on, 1 = off
+		sip_modem_hookstate = arg;
+		DBG("socket:sipinfo:hookstate: %x \n",sip_modem_hookstate);
+		if (pid) {
+			struct socket_frame socket_frame = { 0 };
+
+			socket_frame.type = SOCKET_FRAME_SIP_INFO;
+			socket_frame.data.sipinfo.modem_hook_state = arg;
+			ret = write(dev->fd, &socket_frame, sizeof(socket_frame));
+			if (ret != sizeof(socket_frame)) {
+				perror("write");
+			}
+			socket_frame.type = SOCKET_FRAME_AUDIO;
+		}
+		ret = 0;
+		break;
 	case MDMCTL_SPEED: // sample rate (9600)
 	case MDMCTL_GETFMTS:
 	case MDMCTL_SETFMT:
@@ -760,8 +839,8 @@ static int socket_ioctl(struct modem *m, unsigned int cmd, unsigned long arg)
 
 struct modem_driver socket_modem_driver = {
         .name = "socket driver",
-        .start = socket_start,
-        .stop = socket_stop,
+        .start = socket_dial,
+        .stop = socket_hangup,
         .ioctl = socket_ioctl,
 };
 
@@ -780,13 +859,15 @@ static int mdm_device_read(struct device_struct *dev, char *buf, int size)
 			return ret;
 		}
 
-		if (ret != sizeof(socket_frame)) {
-			ERR("frame size doesn't match %d - %d\n", ret, sizeof(socket_frame));
-			exit(EXIT_FAILURE);
-		}
+
 
 		switch (socket_frame.type) {
 			case SOCKET_FRAME_AUDIO:
+				if (ret != sizeof(socket_frame)) {
+					ERR("audio frame size doesn't match %d - %d\n", ret, sizeof(socket_frame));
+					//exit(EXIT_FAILURE);
+					return 0;
+				}
 				if (rcSIPtoMODEM == NULL) {
 					return 0;
 				}
@@ -794,6 +875,13 @@ static int mdm_device_read(struct device_struct *dev, char *buf, int size)
 				RcFixed_Resample(rcSIPtoMODEM, socket_frame.data.audio.buf, sizeof(socket_frame.data.audio.buf)/2, buf, &size);
 				return size;
 				break;
+
+			case SOCKET_FRAME_VOLUME:
+				ERR("VOLUME_FRAME\n");
+				return 0;
+			case SOCKET_FRAME_SIP_INFO:
+				ERR("SIP_INFO_FRAME\n");
+				return 0;
 			default:
 				ERR("invalid frame received!\n");
 				break;
@@ -1293,8 +1381,17 @@ int modem_main(const char *dev_name)
 	INFO("Use `%s' as modem device, Ctrl+C for termination.\n",
 	     *link_name ? link_name : m->pty_name);
 
+	//start socket		 
+	
+	socket_start(m);
+
 	/* main loop here */
 	ret = modem_run(m,&device);
+
+
+	//close socket
+	
+	socket_stop(m);
 
 	datafile_save_info(path_name,&m->dsp_info);
 
