@@ -44,7 +44,7 @@ static pj_pool_t *pool;
 
 static int volume = 0;
 static int sip_modem_hookstate =0;
-static char *dialstring = "";
+static char dialstring[128] = "";
 
 #ifdef WITH_AUDIO
 static pjsua_conf_port_id left_audio_id, right_audio_id;
@@ -126,23 +126,23 @@ static pj_status_t dmodem_get_frame(pjmedia_port *this_port, pjmedia_frame *fram
 					printf("dmodem_get_frame: Volume: %d -> %f\n", volume, level);
 				}
 				break;
-			case SOCKET_FRAME_SIP_INFO:
-				printf("dmodem_get_frame: sip info frame recieved\n");
-				printf("dmodem_get_frame: modem_hook_state %s\n",socket_frame.data.sipinfo.modem_hook_state);
-				printf("dmodem_get_frame: cid %s\n",socket_frame.data.sipinfo.cid);
-				if (socket_frame.data.sipinfo.modem_hook_state != sip_modem_hookstate){
-					// answer or disconnect call based on hook state
-					printf("dmodem_get_frame: current hookstate: %s\n",sip_modem_hookstate);
-					sip_modem_hookstate = socket_frame.data.sipinfo.modem_hook_state;
-					printf("dmodem_get_frame: changed hookstate: %s\n",sip_modem_hookstate);
-				}
-				if (socket_frame.data.sipinfo.cid != dialstring){
-					printf("dmodem_get_frame: new cid data\n");
-					printf("dmodem_get_frame: old dialstring: %s \n",dialstring);
-					dialstring = socket_frame.data.sipinfo.cid;
-					printf("dmodem_get_frame: new dialstring: %s \n",dialstring);
-				}
-				break;
+			//case SOCKET_FRAME_SIP_INFO:
+			//	printf("dmodem_get_frame: sip info frame recieved\n");
+			//	printf("dmodem_get_frame: modem_hook_state %s\n",socket_frame.data.sipinfo.modem_hook_state);
+			//	printf("dmodem_get_frame: cid %s\n",socket_frame.data.sipinfo.cid);
+			//	if (socket_frame.data.sipinfo.modem_hook_state != sip_modem_hookstate){
+			//		// answer or disconnect call based on hook state
+			//		printf("dmodem_get_frame: current hookstate: %s\n",sip_modem_hookstate);
+			//		sip_modem_hookstate = socket_frame.data.sipinfo.modem_hook_state;
+			//		printf("dmodem_get_frame: changed hookstate: %s\n",sip_modem_hookstate);
+			//	}
+			//	if (socket_frame.data.sipinfo.cid != dialstring){
+			//		printf("dmodem_get_frame: new cid data\n");
+			//		printf("dmodem_get_frame: old dialstring: %s \n",dialstring);
+			//		dialstring = socket_frame.data.sipinfo.cid;
+			//		printf("dmodem_get_frame: new dialstring: %s \n",dialstring);
+			//	}
+			//	break;
 			default:
 				//error_exit("Invalid frame received!", 0);
 				printf("dmodem_get_frame: invalid frame\n");
@@ -171,7 +171,8 @@ static void on_call_state(pjsua_call_id call_id, pjsip_event *e) {
 				ci.state_text.ptr));
 
 	if (ci.state ==PJSIP_INV_STATE_DISCONNECTED) {
-
+		//hup modem when disconnected
+		
 	}
 
 	//if (ci.state == PJSIP_INV_STATE_DISCONNECTED) {
@@ -317,6 +318,8 @@ int main(int argc, char *argv[]) {
 	}
 	printf("dmodem starting..\n");
 	signal(SIGPIPE,SIG_IGN);
+
+	printf("args: %s %s %s %s\n",argv[1],argv[2],argv[3],argv[4]);
 
 	char *dialstr = argv[1];
 
@@ -517,7 +520,9 @@ int main(int argc, char *argv[]) {
 
 	printf("Dialer PID: %d\n", getpid());
 
-	
+	char sipcid[32];
+
+
 	if (dial[0]){
 	pjsua_call_id callid;
 	
@@ -527,38 +532,57 @@ int main(int argc, char *argv[]) {
 	
 	struct timespec ts = {100, 0};
 	while(1) {
-
+		printf("loop?\n");
 		int len;
 		if ((len=read(atoi(argv[3]), &sip_socket_frame, sizeof(sip_socket_frame))) != sizeof(sip_socket_frame)) {
 			//error_exit("error reading frame",0);
-			printf("dmodem_get_frame: error reading frame\n");
+			
+			printf("dmodem_main: error reading frame %i\n",len);
 		}
 
 		switch(sip_socket_frame.type) {
 			case SOCKET_FRAME_SIP_INFO:
-				printf("dmodem_get_frame: sip info frame recieved\n");
-				printf("dmodem_get_frame: modem_hook_state %s\n",sip_socket_frame.data.sipinfo.modem_hook_state);
-				printf("dmodem_get_frame: cid %s\n",sip_socket_frame.data.sipinfo.cid);
+				printf("dmodem_main: sip info frame recieved\n");
+				printf("dmodem_main: modem_hook_state %d\n",sip_socket_frame.data.sipinfo.modem_hook_state);
+				printf("dmodem_main: cid %s\n",sip_socket_frame.data.sipinfo.cid);
+				printf("dmodem_main: still here? \n");
 				if (sip_socket_frame.data.sipinfo.modem_hook_state != sip_modem_hookstate){
 					// answer or disconnect call based on hook state
-					printf("dmodem_get_frame: current hookstate: %s\n",sip_modem_hookstate);
+					printf("dmodem_main: current hookstate: %d\n",sip_modem_hookstate);
 					sip_modem_hookstate = sip_socket_frame.data.sipinfo.modem_hook_state;
-					printf("dmodem_get_frame: changed hookstate: %s\n",sip_modem_hookstate);
+					printf("dmodem_main: changed hookstate: %d\n",sip_modem_hookstate);
+					if (!sip_modem_hookstate) {
+						printf("hanging up calls due to hookstate \n");
+						pjsua_call_hangup_all();
+					}
 				}
-				if (sip_socket_frame.data.sipinfo.cid != dialstring){
-					printf("dmodem_get_frame: new cid data\n");
-					printf("dmodem_get_frame: old dialstring: %s \n",dialstring);
-					dialstring = sip_socket_frame.data.sipinfo.cid;
-					printf("dmodem_get_frame: new dialstring: %s \n",dialstring);
+				if (sip_socket_frame.data.sipinfo.cid != sipcid){
+
+					printf("dmodem_main: new cid data\n");
+					printf("dmodem_main: old dialstring: %s \n",sipcid);
+					sprintf(sipcid,"%s",sip_socket_frame.data.sipinfo.cid);
+					sprintf(buf,"sip:%s@%s",sip_socket_frame.data.sipinfo.cid,sip_domain);
+					pj_str_t sipuri = pj_str(buf);
+					printf("dmodem_main: new dialstring: %s \n",sipcid);
+					printf("dmodem_main: sip dialstring: %s \n",sipuri);
+					
+					if (sipcid[0]){
+					printf("dialling..");
+					//make call
+					pjsua_call_id callid;
+					status = pjsua_call_make_call(acc_id, &sipuri, 0, NULL, NULL, &callid);
+					if (status != PJ_SUCCESS) error_exit("Error making call", status);
+					}
 				}
 				break;
 			default:
-				//error_exit("Invalid frame received!", 0);
-				printf("dmodem_get_frame: invalid frame\n");
+				printf("dmodem_main: invalid frame\n");
+				error_exit("Invalid frame received!", 0);
+				break;
 		}
 	
 
-		nanosleep(&ts,NULL);
+		//nanosleep(&ts,NULL);
 	}
 
 	return 0;

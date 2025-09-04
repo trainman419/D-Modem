@@ -134,10 +134,10 @@ struct socket_frame_volume {
 };
 
 struct socket_frame_sip_info {
-	char *cid; //caller id
-	char *sipstate; //sip state (ringing,calling,incall)
+	char cid[32]; //caller id
+	char sipstate[16]; //sip state (ringing,calling,incall)
 	int registered; //sip registration state
-	int modem_hook_state; //modem hook state
+	unsigned modem_hook_state; //modem hook state
 };
 
 struct socket_frame {
