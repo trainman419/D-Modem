@@ -43,6 +43,7 @@ static bool destroying = false;
 static pj_pool_t *pool;
 
 static int volume = 0;
+static int sipsocket;
 static int sip_modem_hookstate =0;
 static char dialstring[128] = "";
 
@@ -73,12 +74,15 @@ static pj_status_t dmodem_put_frame(pjmedia_port *this_port, pjmedia_frame *fram
 	}
 
 	if (frame->type == PJMEDIA_FRAME_TYPE_AUDIO) {
+	//	printf("dmodem:writing audio frame\n"); //super debug
 		memcpy(socket_frame.data.audio.buf, frame->buf, frame->size);
 		socket_frame.type = SOCKET_FRAME_AUDIO;
 
 		if ((len=write(sm->sock, &socket_frame, sizeof(socket_frame))) != sizeof(socket_frame)) {
+			printf("dmodem:error writing audio frame\n");
 			//error_exit("error writing frame",0);
 		}
+
 	}
 
 	return PJ_SUCCESS;
@@ -104,6 +108,7 @@ static pj_status_t dmodem_get_frame(pjmedia_port *this_port, pjmedia_frame *fram
 
 		switch(socket_frame.type) {
 			case SOCKET_FRAME_AUDIO:
+				//printf("dmodem_get_frame: audio frame recieved\n");
 				len = frame->size;
 				memcpy(frame->buf, socket_frame.data.audio.buf, len);
 				frame->timestamp.u64 = sm->timestamp.u64;
@@ -266,9 +271,11 @@ static void on_incoming_call(pjsua_acc_id acc_id, pjsua_call_id call_id,
     pjsua_call_info inci;
 	pjsua_conf_port_id port_id;
 
+	struct socket_frame sip_socket_frame = { 0 };
     //PJ_UNUSED_ARG(acc_id);
     PJ_UNUSED_ARG(rdata);
-
+	char buf[256];
+	int ret;
     pjsua_call_get_info(call_id, &inci);
 	printf("RING!\n");
 	printf("Incoming call from %.*s\n",(int)inci.remote_info.slen,
@@ -277,14 +284,22 @@ static void on_incoming_call(pjsua_acc_id acc_id, pjsua_call_id call_id,
     PJ_LOG(3,(__FILE__, "Incoming call from %.*s!!",
                          (int)inci.remote_info.slen,
                          inci.remote_info.ptr));
+	sip_socket_frame.type = SOCKET_FRAME_SIP_INFO;
+	printf("return_data_to_modem: write to socket\n");
+	snprintf(buf,256,"SR");
+	ret = write(sipsocket,&sip_socket_frame, sizeof(sip_socket_frame));
+	printf("sip socket write %i\n",ret);
+	if (ret != sizeof(sip_socket_frame)) {
+			perror("return_data_to_child: write fail\n");
+		exit(EXIT_FAILURE);
+	}
 	
-	
-
+						 
     /* Automatically answer incoming calls with 200/OK */
-    pjsua_call_answer(call_id, 200, NULL, NULL);
-	pjsua_conf_add_port(pool, &port.base, &port_id);
-	pjsua_conf_connect(inci.conf_slot, port_id);
-	pjsua_conf_connect(port_id, inci.conf_slot);
+//    pjsua_call_answer(call_id, 200, NULL, NULL);
+//	pjsua_conf_add_port(pool, &port.base, &port_id);
+//	pjsua_conf_connect(inci.conf_slot, port_id);
+//	pjsua_conf_connect(port_id, inci.conf_slot);
 
 }
 
@@ -306,7 +321,9 @@ int main(int argc, char *argv[]) {
 	pjsua_acc_id acc_id;
 	pjsua_transport_id transport;
 	pj_status_t status;
-
+	pjmedia_port blankmediaport;
+	pjsua_conf_port_id blank_port_id;
+	struct socket_frame socket_frame = { 0 };
 	struct socket_frame sip_socket_frame = { 0 };
 
 	char *sip_domain = NULL;
@@ -322,6 +339,7 @@ int main(int argc, char *argv[]) {
 	printf("args: %s %s %s %s\n",argv[1],argv[2],argv[3],argv[4]);
 
 	char *dialstr = argv[1];
+	sipsocket = atoi(argv[3]);
 
 	char *sip_user = getenv("SIP_LOGIN");
 	if (!sip_user) {
@@ -431,6 +449,8 @@ int main(int argc, char *argv[]) {
 	status = pjsua_start();
 	if (status != PJ_SUCCESS) error_exit("Error starting pjsua", status);
 
+
+
 	if (!direct_call) {
 		pjsua_acc_config cfg;
 		pjsua_acc_config_default(&cfg);
@@ -530,6 +550,12 @@ int main(int argc, char *argv[]) {
 	if (status != PJ_SUCCESS) error_exit("Error making call", status);
 	}
 	
+	//hack to start socket
+	//pjsua_conf_add_port(pool,&port.base,&blank_port_id);
+	//pjsua_conf_connect(blank_port_id,blank_port_id);
+
+
+
 	struct timespec ts = {100, 0};
 	while(1) {
 		printf("loop?\n");
@@ -539,51 +565,77 @@ int main(int argc, char *argv[]) {
 			
 			printf("dmodem_main: error reading frame %i\n",len);
 		}
-
+		char *packet;
+		packet = sip_socket_frame.data.sip.info;
+		printf("dmm:packet:%s\n",sip_socket_frame.data.sip.info);
 		switch(sip_socket_frame.type) {
 			case SOCKET_FRAME_SIP_INFO:
 				printf("dmodem_main: sip info frame recieved\n");
-				printf("dmodem_main: modem_hook_state %d\n",sip_socket_frame.data.sipinfo.modem_hook_state);
-				printf("dmodem_main: cid %s\n",sip_socket_frame.data.sipinfo.cid);
-				printf("dmodem_main: still here? \n");
-				if (sip_socket_frame.data.sipinfo.modem_hook_state != sip_modem_hookstate){
-					// answer or disconnect call based on hook state
-					printf("dmodem_main: current hookstate: %d\n",sip_modem_hookstate);
-					sip_modem_hookstate = sip_socket_frame.data.sipinfo.modem_hook_state;
-					printf("dmodem_main: changed hookstate: %d\n",sip_modem_hookstate);
-					if (!sip_modem_hookstate) {
-						printf("hanging up calls due to hookstate \n");
-						pjsua_call_hangup_all();
-					}
-				}
-				if (sip_socket_frame.data.sipinfo.cid != sipcid){
+				//printf("dmodem_main: still here? \n");
 
-					printf("dmodem_main: new cid data\n");
-					printf("dmodem_main: old dialstring: %s \n",sipcid);
-					sprintf(sipcid,"%s",sip_socket_frame.data.sipinfo.cid);
-					sprintf(buf,"sip:%s@%s",sip_socket_frame.data.sipinfo.cid,sip_domain);
-					pj_str_t sipuri = pj_str(buf);
-					printf("dmodem_main: new dialstring: %s \n",sipcid);
-					printf("dmodem_main: sip dialstring: %s \n",sipuri);
+				printf("dmm:packet:%s\n",packet);
+				if (strncmp(packet,"M",1) == 0){
+					packet++;
+
+					printf("dmm:packet:M:%s\n",packet);
+					if (strncmp(packet,"H",1) == 0){
+						packet++;
+						printf("dmm:packet:H:%s\n",packet);
+						
+						int hs;
+						hs = atoi(packet);
+						// answer or disconnect call based on hook state
+						printf("dmodem_main: current hookstate: %i\n",sip_modem_hookstate);
+						if (hs != sip_modem_hookstate) {
+							if (!hs) {
+								printf("hanging up calls due to hookstate \n");
+								pjsua_call_hangup_all();
+								}
+						sip_modem_hookstate = hs;
+						printf("dmodem_main: changed hookstate: %d\n",sip_modem_hookstate);						
+						}
+					}				
+					if (strncmp(packet,"D",1) == 0){
+						packet++;
+						printf("dmm:packet:H:%s\n",packet);
+						printf("dmodem_main: new cid data\n");
+						printf("dmodem_main: old dialstring: %s \n",sipcid);
 					
-					if (sipcid[0]){
-					printf("dialling..");
-					//make call
-					pjsua_call_id callid;
-					status = pjsua_call_make_call(acc_id, &sipuri, 0, NULL, NULL, &callid);
-					if (status != PJ_SUCCESS) error_exit("Error making call", status);
+						sprintf(sipcid,"%s",packet);
+						sprintf(buf,"sip:%s@%s",sipcid,sip_domain);
+						pj_str_t sipuri = pj_str(buf);
+						printf("dmodem_main: new dialstring: %s \n",sipcid);
+						printf("dmodem_main: sip dialstring: %s \n",sipuri);
+					
+						//check cid
+						if (sipcid[0]){
+						printf("dmodem_main: dialling..\n");
+						//make call
+						pjsua_call_id callid;
+						//update modem of call state
+						sprintf(sip_socket_frame.data.sip.info,"CALLING");
+						if ((len=write(atoi(argv[3]), &sip_socket_frame, sizeof(sip_socket_frame))) != sizeof(sip_socket_frame)) {
+						printf("dmodem_main: error writing frame %i\n",len);}	
+						//call pjsua
+						status = pjsua_call_make_call(acc_id, &sipuri, 0, NULL, NULL, &callid);
+						if (status != PJ_SUCCESS) error_exit("Error making call", status);
+						}
+						printf("dmodem_main: cid loop complete\n");
+						
 					}
-				}
-				break;
-			default:
-				printf("dmodem_main: invalid frame\n");
-				error_exit("Invalid frame received!", 0);
-				break;
-		}
-	
 
+					printf("dmodem_main: finished commands\n");
+					
+					//return 0;
+				}
+		default:
+			printf("dmodem_main: invalid frame\n");
+			//error_exit("Invalid frame received!", 0);
+			//break;
+		
+	
+		}
 		//nanosleep(&ts,NULL);
 	}
 
-	return 0;
-}
+}	

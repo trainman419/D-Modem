@@ -146,6 +146,7 @@ static char outbuf[4096];
 static pid_t pid = 0;
 static int modem_volume = 0;
 static int sip_modem_hookstate = 0;
+static int sip_ringing = 0;
 static void *rcSIPtoMODEM = NULL;
 static void *rcMODEMtoSIP = NULL;
 
@@ -159,7 +160,7 @@ static void *rcMODEMtoSIP = NULL;
 #define INTERNAL_DELAY 40 /* internal device tx/rx delay: should be selfdetectible */
 
 extern unsigned use_alsa;
-static snd_output_t *dbg_out = NULL;
+static snd_output_t *DBG_out = NULL;
 
 static int alsa_mixer_setup(struct device_struct *dev, const char *dev_name)
 {
@@ -248,7 +249,7 @@ static int alsa_device_setup(struct device_struct *dev, const char *dev_name)
 	dev->num = 0; /* <-- FIXME */
 
 	if(modem_debug_level > 0)
-		snd_output_stdio_attach(&dbg_out,stderr,0);
+		snd_output_stdio_attach(&DBG_out,stderr,0);
 
 	return 0;
 }
@@ -467,7 +468,7 @@ static int setup_stream(snd_pcm_t *handle, struct modem *m, const char *stream_n
 	snd_pcm_sw_params_free(sw_params);
 
 	if(modem_debug_level > 0)
-		snd_pcm_dump(handle,dbg_out);
+		snd_pcm_dump(handle,DBG_out);
 	return 0;
 }
 
@@ -631,7 +632,7 @@ static int socket_start (struct modem *m)
 	struct device_struct *dev = m->dev_data;
 	struct socket_frame socket_frame = { 0 };
 	struct socket_frame sip_socket_frame = { 0 };
-
+	int buf;
 	int ret;
 	DBG("socket_start...\n");
 
@@ -645,7 +646,7 @@ static int socket_start (struct modem *m)
 		exit(-1);
 	}
 	//socket for call info
-	if (socketpair(AF_UNIX, SOCK_STREAM, 0, sip_sockets) == -1) {
+	if (socketpair(AF_UNIX, SOCK_DGRAM, 0, sip_sockets) == -1) {
 		perror("socketpair");
 		exit(-1);
 	}
@@ -688,32 +689,37 @@ static int socket_start (struct modem *m)
 		socket_frame.type = SOCKET_FRAME_AUDIO;
 		sip_socket_frame.type = SOCKET_FRAME_SIP_INFO;
 
+		DBG("write audio frame..");
 		ret = write(dev->fd, &socket_frame, sizeof(socket_frame));
 		if (ret != sizeof(socket_frame)) {
-			perror("write");
+			perror("fork write audio frame\n");
 			exit(EXIT_FAILURE);
 		}
 		dev->delay = MODEM_FRAMESIZE;
 		DBG("done delay thing\n");
-
+		DBG("write volume frame..");
 		socket_frame.type = SOCKET_FRAME_VOLUME;
 		socket_frame.data.volume.value = modem_volume;
 		ret = write(dev->fd, &socket_frame, sizeof(socket_frame));
 		if (ret != sizeof(socket_frame)) {
-			perror("write");
+			perror("fork write volume frame\n");
 			exit(EXIT_FAILURE);
 		}
-		snprintf(sip_socket_frame.data.sipinfo.cid,30,"%s",m->dial_string);
-		//sip_socket_frame.data.sipinfo.cid = sprintf();
-		sip_socket_frame.data.sipinfo.modem_hook_state = m->hook;
-		sip_socket_frame.data.sipinfo.registered = 0;
-		//sip_socket_frame.data.sipinfo.sipstate[0] = strdup("IDLE");
-		ret = write(dev->sipfd, &sip_socket_frame, sizeof(sip_socket_frame));
-		DBG("sip socket write %i\n",ret);
-		if (ret != sizeof(socket_frame)) {
-			perror("write");
-			exit(EXIT_FAILURE);
-		}
+		DBG("fork write info frame..");
+		//snprintf(buf,256,"MD%s",m->dial_string);
+		//return_data_to_child(m,buf);
+		//snprintf(buf,256,"MH%s",m->hook);
+		//return_data_to_child(m,buf);
+		//snprintf(buf,256,"MS%s",m->state);
+		//return_data_to_child(m,buf);
+		char write[256];
+		snprintf(write,256,"MH%i",sip_modem_hookstate);
+		return_data_to_child(m,write);
+		DBG("write frame 1 complete..\n");
+		//snprintf(write,256,"stillhere",sip_modem_hookstate);
+		//return_data_to_child(m,write);
+		//DBG("write frame 2 complete..");
+
 		rcSIPtoMODEM = RcFixed_Create(2);
 		rcMODEMtoSIP = RcFixed_Create(3);
 		if (rcSIPtoMODEM == NULL || rcMODEMtoSIP == NULL) {
@@ -724,29 +730,56 @@ static int socket_start (struct modem *m)
 	return 0;
 }
 
+void return_data_to_child (struct modem *m,char buf[256])
+{
+		struct device_struct *dev = m->dev_data;
+		struct socket_frame sip_socket_frame = { 0 };
+		int ret;
+		DBG("return_data_to_child: called");
+		sip_socket_frame.type = SOCKET_FRAME_SIP_INFO;
+		snprintf(sip_socket_frame.data.sip.info,256,"%s",buf);
+		DBG("return_data_to_child: write to socket");
+		ret = write(dev->sipfd, &sip_socket_frame, sizeof(sip_socket_frame));
+		DBG("sip socket write %i\n",ret);
+		if (ret != sizeof(sip_socket_frame)) {
+			perror("return_data_to_child: write fail");
+			exit(EXIT_FAILURE);
+		}
+
+}
+
 //this is what the modem calls to dial out/init the modem
 //send cid in socket
 static int socket_dial (struct modem *m)
 {
 	struct device_struct *dev = m->dev_data;
 	struct socket_frame sip_socket_frame = { 0 };
-	
 	int ret;
-	DBG("dial_start...\n");
-	DBG("Dialling %s...\n",m->dial_string);
+	char dialreturn[32];
+	char atstring[64];
+	DBG("socket_dial:request...\n");
+	DBG("AT String %s",m->at_cmd);
+	
+	//No AT cmd
+	if (m->at_cmd == '\0'){
+		DBG("No AT command");
+		return 0;
+	}
+	//AT Dial
+	if (strncasecmp(m->at_cmd,"ATD",4)==0){
+	DBG("socket_dial:Dialling %s...\n",m->dial_string);
 	sip_modem_hookstate = 1;
 	DBG("socket:sipinfo:hookstate: %x \n",sip_modem_hookstate);
-
-	sip_socket_frame.type = SOCKET_FRAME_SIP_INFO;
-
-	sip_socket_frame.data.sipinfo.modem_hook_state = sip_modem_hookstate;
-	snprintf(sip_socket_frame.data.sipinfo.cid,30,"%s",m->dial_string);
-	//sip_socket_frame.data.sipinfo.cid[1] = m->dial_string;
-	ret = write(dev->sipfd, &sip_socket_frame, sizeof(sip_socket_frame));
-	if (ret != sizeof(sip_socket_frame)) {
-		perror("write");
-		}
+	snprintf(dialreturn,16,"MD%s",m->dial_string);	
+	DBG("returning data...\n")
+	return_data_to_child(m,dialreturn);
 	DBG("wrote m->dialstring to socket\n");
+	}
+	//AT Answer
+	if (strncasecmp(m->at_cmd,"ATA",4)==0){
+		DBG("TO IMPLEMENT ANSWERING");
+		
+	}
 	return 0;
 }
 
@@ -773,19 +806,13 @@ static int socket_stop (struct modem *m)
 static int socket_hangup (struct modem *m)
 {
 	struct device_struct *dev = m->dev_data;
-	int ret;
-	DBG("hangup / close socket...\n");
+	char ret[256];
+	DBG("hangup...\n");
 	sip_modem_hookstate = 0;
 	DBG("socket:sipinfo:hookstate: %x \n",sip_modem_hookstate);
-	struct socket_frame sip_socket_frame = { 0 };
-
-	sip_socket_frame.type = SOCKET_FRAME_SIP_INFO;
-	sip_socket_frame.data.sipinfo.modem_hook_state = sip_modem_hookstate;
-	ret = write(dev->sipfd, &sip_socket_frame, sizeof(sip_socket_frame));
-	if (ret != sizeof(sip_socket_frame)) {
-		perror("write");
-	}
-			
+	snprintf(ret,3,"MH%i",sip_modem_hookstate);
+	DBG("return data to child process...\n");
+	return_data_to_child(m,ret);
 	return 0;
 }
 
@@ -814,12 +841,13 @@ static int socket_ioctl(struct modem *m, unsigned int cmd, unsigned long arg)
 		if (pid) {
 			struct socket_frame socket_frame = { 0 };
 
-			socket_frame.type = SOCKET_FRAME_VOLUME;
-			socket_frame.data.volume.value = arg;
-			ret = write(dev->fd, &socket_frame, sizeof(socket_frame));
-			if (ret != sizeof(socket_frame)) {
-				perror("write");
-			}
+			//socket_frame.type = SOCKET_FRAME_VOLUME;
+			//socket_frame.data.volume.value = arg;
+			//ret = write(dev->fd, &socket_frame, sizeof(socket_frame));
+			//if (ret != sizeof(socket_frame)) {
+			//	perror("speaker vol write fail");
+			//}
+			DBG("adjust volume frame needed");
 		}
 		ret = 0;
 		break;
@@ -866,19 +894,36 @@ struct modem_driver socket_modem_driver = {
 static int mdm_device_read(struct device_struct *dev, char *buf, int size)
 {
 	struct socket_frame socket_frame = { 0 };
+	struct socket_frame sip_socket_frame = { 0 };
 
 	if (size < MODEM_FRAMESIZE) {
+		DBG("mdm_device_read return");
 		return 0;
 	}
 
 	while(1) {
 		int ret = read(dev->fd, &socket_frame, sizeof(socket_frame));
+		int len;
+
+		if ((len=read(dev->sipfd, &sip_socket_frame, sizeof(sip_socket_frame))) != sizeof(sip_socket_frame)) {
+			//error_exit("error reading frame",0);			
+			printf("mdm_device_read: error reading frame %i\n",len);
+		}
 
 		if (ret < 0) {
 			return ret;
 		}
-
-
+		DBG("READ");
+		DBG("DATA:%s",sip_socket_frame.data.sip.info);
+		if (strncmp(sip_socket_frame.data.sip.info,"SR",3) == 0){
+			sip_ringing == 1;	//ringing
+			DBG("Modem Ring?\n");
+			//modem_send_to_tty(m,"RING",4);
+		}
+		if (strncmp(sip_socket_frame.data.sip.info,"SI",3) == 0){
+			sip_ringing == 0;	//idle
+			//modem_send_to_tty(m,"RING",4);
+		}
 
 		switch (socket_frame.type) {
 			case SOCKET_FRAME_AUDIO:
@@ -888,6 +933,7 @@ static int mdm_device_read(struct device_struct *dev, char *buf, int size)
 					return 0;
 				}
 				if (rcSIPtoMODEM == NULL) {
+					ERR("rcSIPtoMODEM NULL\n");
 					return 0;
 				}
 
@@ -905,10 +951,44 @@ static int mdm_device_read(struct device_struct *dev, char *buf, int size)
 				ERR("invalid frame received!\n");
 				break;
 		}
+
+	if (size < MODEM_FRAMESIZE) {
+		return 0;
+	}
+
+
+	return 0;
+	}
+}
+
+static int sip_device_read(struct device_struct *dev, char *buf, int size)
+{
+	struct socket_frame sip_socket_frame = { 0 };
+
+	if (size < MODEM_FRAMESIZE) {
+		return 0;
+	}
+	while(1) {
+		int ret = read(dev->sipfd, &sip_socket_frame, sizeof(sip_socket_frame));
+
+		if (ret < 0) {
+			return ret;
+		}
+
+		switch (sip_socket_frame.type) {
+			
+			case SOCKET_FRAME_SIP_INFO:
+				ERR("SIP_INFO_FRAME\n");
+				return 0;
+			default:
+				ERR("invalid frame received!\n");
+				break;
+		}
 	}
 
 	return 0;
 }
+
 
 static int mdm_device_write(struct device_struct *dev, const char *buf, int size)
 {
@@ -938,6 +1018,7 @@ static int mdm_device_write(struct device_struct *dev, const char *buf, int size
 
 	return ret;
 }
+
 #if 0
 static int mdm_device_setup(struct device_struct *dev, const char *dev_name)
 {
@@ -1075,6 +1156,7 @@ static int (*device_setup)(struct device_struct *dev, const char *dev_name);
 static int (*device_release)(struct device_struct *dev);
 static int (*device_read)(struct device_struct *dev, char *buf, int size);
 static int (*device_write)(struct device_struct *dev, const char *buf, int size);
+static int (*sipdevice_read)(struct device_struct *dev, char *buf, int size);
 static struct modem_driver *modem_driver;
 
 static volatile sig_atomic_t keep_running = 1;
@@ -1094,38 +1176,48 @@ void child_conn_closed(int signum)
 static int modem_run(struct modem *m, struct device_struct *dev)
 {
 	struct timeval tmo;
+	struct socket_frame sip_socket_frame = { 0 };
 	fd_set rset,eset;
+	fd_set srset,seset;
 	struct termios termios;
 	unsigned pty_closed = 0, close_count = 0;
 	int max_fd;
-	//int sip_max_fd;
+	int sip_max_fd;
 	int ret, count;
+	int sret,scount;
+
 	void *in;
 
 	while(keep_running) {
-
+		DBG("keep_running modem_event");
 		if(m->event)
 			modem_event(m);
 
 #ifdef MODEM_CONFIG_RING_DETECTOR
-		if(ring_detector && !m->started)
+		if(ring_detector && !m->started){
+			DBG("keep_running ring_detector_event");
 			modem_ring_detector_start(m);
+		}
 #endif
 
                 tmo.tv_sec = 1;
                 tmo.tv_usec= 0;
+				DBG("keep_running FD_ZERO");
                 FD_ZERO(&rset);
+				FD_ZERO(&srset);
 		FD_ZERO(&eset);
+		FD_ZERO(&seset);
+				DBG("keep_running FDSET");
 		if(m->started)
 			FD_SET(dev->fd,&rset);
 		if(m->started)	
-			FD_SET(dev->sipfd,&rset);
+			FD_SET(dev->sipfd,&srset);
 
 		FD_SET(dev->fd,&eset);
-		FD_SET(dev->sipfd,&eset);
+		FD_SET(dev->sipfd,&seset);
 		max_fd = dev->fd;
-		//sip_max_fd = dev->sipfd;
-		
+		sip_max_fd = dev->sipfd;
+			DBG("keep_running pty_closed count");
 		if(pty_closed && close_count > 0) {
 			if(!m->started ||
 				++close_count > CLOSE_COUNT_MAX )
@@ -1133,21 +1225,36 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 		}
 		else if(m->xmit.size - m->xmit.count > 0) {
 			FD_SET(m->pty,&rset);
+			FD_SET(m->pty,&srset);
 			if(m->pty > max_fd) max_fd = m->pty;
+			if(m->pty > sip_max_fd) sip_max_fd = m->pty;
 		}
-
+				DBG("keep_running select audio");
                 ret = select(max_fd + 1,&rset,NULL,&eset,&tmo);
+				DBG("keep_runnng select sipinfo\n");
+				ret = select(sip_max_fd + 1,&srset,NULL,&seset,NULL);
+				DBG("check sip ringing %d",sip_ringing);
+				//int ret = read(dev->sipfd, &sip_socket_frame, sizeof(sip_socket_frame));
+				DBG("check sip ring loop");
+				if(sip_ringing == 1){
+						modem_send_to_tty(m,"RING",4);
+						DBG("TTY RING!!");
+						sip_ringing = 0;
+					}
 
+				DBG("keep_running ret < 0");
                 if (ret < 0) {
-			if (errno == EINTR)
-				continue;
+					if (errno == EINTR)
+					continue;
                         ERR("select: %s\n",strerror(errno));
                         return ret;
                 }
-
+					DBG("keep_running ret == 0");
 		if ( ret == 0 )
 			continue;
 
+
+				DBG("keep_running FD_ISSET eset");
 		if(FD_ISSET(dev->fd, &eset)) {
 			unsigned stat;
 			DBG("dev exception...\n");
@@ -1167,21 +1274,10 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 			continue;
 		}
 		//sipfd
-		if(FD_ISSET(dev->sipfd, &eset)) {
-			unsigned stat;
-			DBG("sipdev exception...\n");
-			ret = ioctl(dev->sipfd,100000+MDMCTL_GETSTAT,&stat);
-			if(ret < 0) {
-				ERR("sipdev ioctl: %s\n",strerror(errno));
-				return -1;
-			}
-			if(stat&MDMSTAT_ERROR) modem_error(m);
-			if(stat&MDMSTAT_RING)  modem_ring(m);
-			continue;
-		}	
+			DBG("keep_running FD_ISSET rset");
 		if(FD_ISSET(dev->fd, &rset)) {
 			count = device_read(dev,inbuf,sizeof(inbuf)/2);
-			//DBG("sipfd\n");
+
 			if(count <= 0) {
 				if (errno == ECONNRESET) {
 					DBG("lost connection to child socket process\n");
@@ -1189,6 +1285,7 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 					ERR("dev read: %s\n",strerror(errno));
 				}
 				// hack to force hangup
+				DBG("keep_running modem_hangup");
 				modem_hangup(m); // sets sample_timer_func to run_modem_stop()
 				m->sample_timer_func(m);
 				m->sample_timer = 0;
@@ -1196,6 +1293,7 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 				continue;
 			}
 			in = inbuf;
+			DBG("keep_running change_delay");
 			if(m->update_delay < 0) {
 				if ( -m->update_delay >= count) {
 					DBG("change delay -%d...\n", count);
@@ -1209,28 +1307,30 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 				dev->delay += m->update_delay;
 				m->update_delay = 0;
 			}
-
+			DBG("keep_running modem_process");
 			modem_process(m,inbuf,outbuf,count);
 			errno = 0;
+			DBG("keep_running device_write");
 			count = device_write(dev,outbuf,count);
 			if(count < 0) {
 				if (errno == EPIPE) {
+				DBG("keep_running EPIPE");
 					continue;
 				} else {
-					ERR("dev write: %s\n",strerror(errno));
+					ERR("modem run: dev write: %s\n",strerror(errno));
 					return -1;
 				}
 			}
 			else if (count == 0) {
-				DBG("dev write = 0\n");
+				DBG("modem run dev write = 0\n");
 			}
-
+			DBG("keep_running update_delay");
 			if(m->update_delay > 0) {
 				DBG("change delay +%d...\n", m->update_delay);
 				memset(outbuf, 0, m->update_delay*2);
 				count = device_write(dev,outbuf,m->update_delay);
 				if(count < 0) {
-					ERR("dev write: %s\n",strerror(errno));
+					ERR("1267 modem run dev write: %s\n",strerror(errno));
 					return -1;
 				}
 				if(count != m->update_delay) {
@@ -1241,20 +1341,10 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 				dev->delay += m->update_delay;
 				m->update_delay = 0;
 			}
+			DBG("keep_running finish rset loop");
 		}
-		//sipfd			
-		if(FD_ISSET(dev->sipfd, &rset)) {
-			count = device_read(dev,inbuf,sizeof(inbuf)/2);
-			if(count <= 0) {
-				if (errno == ECONNRESET) {
-					DBG("sip lost connection to child socket process\n");
-				} else {
-					ERR("sip dev read: %s\n",strerror(errno));
-				}
-				continue;
-			}
-		}
-		
+
+		DBG("keep_running FD_ISSET pty rset");
 		if(FD_ISSET(m->pty,&rset)) {
 			/* check termios */
 			tcgetattr(m->pty,&termios);
@@ -1263,6 +1353,7 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 				modem_update_termios(m,&termios);
 			}
 			/* read data */
+			DBG("keep_running read pty");
 			count = m->xmit.size - m->xmit.count;
 			if(count == 0)
 				continue;
@@ -1306,6 +1397,7 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 				ERR("modem_write failed.\n");
 				return -1;
 			}
+			DBG("keep_running pty loop finished");
 		}
 	}
 
@@ -1437,12 +1529,13 @@ int modem_main(const char *dev_name)
 	socket_start(m);
 
 	/* main loop here */
+	DBG("Modem_Run loop begin...\n");
 	ret = modem_run(m,&device);
 
 
 	//close socket
 	
-	socket_stop(m);
+	
 
 	datafile_save_info(path_name,&m->dsp_info);
 
@@ -1461,7 +1554,7 @@ int modem_main(const char *dev_name)
 	device_release(&device);
 
 	modem_debug_exit();
-
+	socket_stop(m);
 	exit(ret);
 	return 0;
 }
@@ -1479,6 +1572,7 @@ int main(int argc, char *argv[])
 	device_setup = socket_device_setup;
 	device_release = mdm_device_release;
 	device_read = mdm_device_read;
+	sipdevice_read = sip_device_read;
 	device_write = mdm_device_write;
 	modem_driver = &socket_modem_driver;
 

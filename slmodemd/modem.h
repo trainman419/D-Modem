@@ -134,10 +134,7 @@ struct socket_frame_volume {
 };
 
 struct socket_frame_sip_info {
-	char cid[32]; //caller id
-	char sipstate[16]; //sip state (ringing,calling,incall)
-	int registered; //sip registration state
-	unsigned modem_hook_state; //modem hook state
+	char info[256]; //bidirectionalinfo
 };
 
 struct socket_frame {
@@ -145,7 +142,7 @@ struct socket_frame {
 	union {
 		struct socket_frame_audio audio;
 		struct socket_frame_volume volume;
-		struct socket_frame_sip_info sipinfo;
+		struct socket_frame_sip_info sip;
 	} data;
 };
 
