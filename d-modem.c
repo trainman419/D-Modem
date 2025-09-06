@@ -400,6 +400,7 @@ int main(int argc, char *argv[]) {
 		med_cfg.quality = 10;
 		med_cfg.no_vad = true;
 		med_cfg.ec_tail_len = 0;
+		med_cfg.snd_use_sw_clock = true;
 #if 0
 		med_cfg.jb_max = 2000;
 //		med_cfg.jb_init = 200;
