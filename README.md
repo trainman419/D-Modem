@@ -8,11 +8,12 @@ https://www.aon.com/cyber-solutions/aon_cyber_labs/introducing-d-modem-a-softwar
  - Increased data rates up to full 56k (tested with Cisco 2951 with PVDM2 digital modems and clock synced to GPS using [icE1usb](https://osmocom.org/projects/e1-t1-adapter/wiki/IcE1usb) at the other end, direct SIP between D-Modem and Cisco)
  - Highly improved connection stability (connections lasting days instead of minutes)
  - Audio output of modem tones using the PJSIP audio output
- - Anonymous calls without credentials
+ - Anonymous calls without credentials (broken)
  - RTP- and SIP-ports randomized, allowing multiple instances on the same system
  - `ATX3` (no dialtone required) is the default
  - Running as non-root directly supported (and encouraged!)
  - Various bug fixes
+ - d-modem can now be called and signals the pty terminal to allow answering
 
 ## Building
 You'll need Linux and a working 32-bit development environment (gcc -m32 needs to work, Debian-based systems can install: libc6-dev-i386 gcc-multilib), along with PJSIP's dependencies (OpenSSL).  Then run 'make' from the top-level directory.
@@ -28,8 +29,6 @@ The repository contains two applications:
 slmodemd – A stripped down and patched version of Debian’s sl-modem-daemon package.  All kernel driver code has been replaced with socket-based communication, allowing external applications to manage audio streams. 
 
 d-modem – External application that interfaces with slmodemd to manage SIP calls and their associated audio streams.
-
-socat.sh - Script that invokes Socat, connecting 2 modems together and transferring data between them via TCP relay (see [Testing](#testing)).
 
 After they have been built, you can configure SIP account information in the SIP_LOGIN environment variable for calls over a SIP proxy:
 
@@ -76,13 +75,14 @@ If you want to initiate a direct call to a SIP endpoint without credentials, use
     Login:
 
 ## Testing
-Install multipurpose relay Socat and Minicom.
 
-Run slmodemd from 2 terminals, passing the path to socat.sh in the -e option and specifying different modem devices.
+You should be running Asterisk or some other sip service.
 
-    # ./slmodemd/slmodemd -d2 -e ./socat.sh /dev/slamr0
+Run slmodemd from 2 terminals and specifying different modem devices. Export sip accounts per slmodem:
 
-    # ./slmodemd/slmodemd -d2 -e ./socat.sh /dev/slamr1
+    # ./slmodemd/slmodemd -d2 -e ./d-modem /dev/slamr0
+
+    # ./slmodemd/slmodemd -d2 -e ./d-modem /dev/slamr1
 
 In 2 other terminals, connect to the newly created serial devices:
 
@@ -95,17 +95,17 @@ To successfully connect, you might need to manually select a modulation and data
     at+ms=132,1,,14400 
     OK
 
-Put one modem in answering mode:
+On one of the terminals, dial the number of the second system. 
+
+    atd5123
+
+On the other terminal, it should indicate RING. Use the AT Answer command to answer.
 
     ata
 
-Finally, dial the number of the second system. 2130706433 is a decimal number of localhost IP address 127.0.0.1. If you run second modem on another machine, convert its IP address to a decimal number and dial.
-
-    atd2130706433
-
 Now modems are connected and can interact with each other:
 
-    CONNECT 9600 
+    CONNECT 33600
 
 To stop data transmission, first escape from on-line mode (+++), then hang up:
 
@@ -115,7 +115,8 @@ To stop data transmission, first escape from on-line mode (+++), then hang up:
 ## Known Issues / Future Work
 - Additional logging/error handling is needed 
 - The serial interface could be replaced with stdio or a socket, and common AT configuration options could be exposed as command line options 
-- There is currently no support for receiving calls in d-modem.
+- d-modem can now recieve calls but it is buggy
+- call handling needs work. might not make another call after it has made one.
 
 
 Copyright 2021 Aon plc
