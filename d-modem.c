@@ -44,6 +44,7 @@ static pj_pool_t *pool;
 
 static int volume = 0;
 static int sipsocket;
+static int answercall;
 static int sip_modem_hookstate =0;
 static char dialstring[128] = "";
 
@@ -74,7 +75,7 @@ static pj_status_t dmodem_put_frame(pjmedia_port *this_port, pjmedia_frame *fram
 	}
 
 	if (frame->type == PJMEDIA_FRAME_TYPE_AUDIO) {
-	//	printf("dmodem:writing audio frame\n"); //super debug
+		//printf("dmodem:writing audio frame\n"); //super debug
 		memcpy(socket_frame.data.audio.buf, frame->buf, frame->size);
 		socket_frame.type = SOCKET_FRAME_AUDIO;
 
@@ -249,7 +250,7 @@ static void on_call_media_state(pjsua_call_id call_id) {
 				if (pjmedia_snd_port_connect(audiodev, sc) != PJ_SUCCESS)
 					error_exit("can't connect audio device port",0);
 			} else {
-				pjsua_perror(__FILE__,"can't create audio device port",0);
+				pjsua_perror(__FILE__,"can't create audio device port",PJ_SUCCESS);
 			}
 #endif
 
@@ -286,7 +287,7 @@ static void on_incoming_call(pjsua_acc_id acc_id, pjsua_call_id call_id,
                          inci.remote_info.ptr));
 	sip_socket_frame.type = SOCKET_FRAME_SIP_INFO;
 	printf("return_data_to_modem: write to socket\n");
-	snprintf(buf,256,"SR");
+	snprintf(sip_socket_frame.data.sip.info,256,"SR");
 	ret = write(sipsocket,&sip_socket_frame, sizeof(sip_socket_frame));
 	printf("sip socket write %i\n",ret);
 	if (ret != sizeof(sip_socket_frame)) {
@@ -294,6 +295,15 @@ static void on_incoming_call(pjsua_acc_id acc_id, pjsua_call_id call_id,
 		exit(EXIT_FAILURE);
 	}
 	
+	while(inci.media_status == PJSUA_CALL_MEDIA_NONE){
+		if (answercall == 1){
+			answercall = 0;
+			pjsua_call_answer(call_id, 200, NULL, NULL);	
+			return;	
+		}
+		
+	}
+
 						 
     /* Automatically answer incoming calls with 200/OK */
 //    pjsua_call_answer(call_id, 200, NULL, NULL);
@@ -343,7 +353,7 @@ int main(int argc, char *argv[]) {
 
 	char *sip_user = getenv("SIP_LOGIN");
 	if (!sip_user) {
-		printf("No SIP_LOGIN not defined, continuing with direct SIP calls.\n");
+		printf("No SIP_LOGIN defined, continuing with direct SIP calls.\n");
 		printf("Use `ATDTendpoint@sip.domain' for calls\n");
 	} else {
 		sip_domain = strchr(sip_user,'@');
@@ -483,12 +493,12 @@ int main(int argc, char *argv[]) {
 	char *dial = dialstr;
 
 	
-	printf("dial = `%s` \n",dial);
-    printf("dialstr = `%s` \n",dialstr);
+	//printf("dial = `%s` \n",dial);
+    //printf("dialstr = `%s` \n",dialstr);
 	//dial string empty. wait for incoming call?
 	if (!dial[0])
 	{
-		printf("Empty Dial String. should play silence waiting for call\n");
+		printf("Empty Dial String. waiting for command\n");
 		
 		//set up conference bridge
 
@@ -519,18 +529,18 @@ int main(int argc, char *argv[]) {
 
 
 	//handle atdt and atdp
-	if (dial[0] == 't' || dial[0] == 'T' ||
-	    dial[0] == 'p' || dial[0] == 'P') {
-		dial++;
-	}
+	//if (dial[0] == 't' || dial[0] == 'T' ||
+	//    dial[0] == 'p' || dial[0] == 'P') {
+	//	dial++;
+	//}
 
-	if (!direct_call) {
-		snprintf(buf,sizeof(buf),"sip:%s@%s",dial,sip_domain);
-	} else {
-		snprintf(buf,sizeof(buf),"sip:%s",dial);
-	}
-	printf("calling %s\n",buf);
-	pj_str_t uri = pj_str(buf);
+	//if (!direct_call) {
+	//	snprintf(buf,sizeof(buf),"sip:%s@%s",dial,sip_domain);
+	//} else {
+	//	snprintf(buf,sizeof(buf),"sip:%s",dial);
+	//}
+	//printf("calling %s\n",buf);
+	//pj_str_t uri = pj_str(buf);
 
 	struct sigaction sa = { 0 };
 	sa.sa_flags = SA_SIGINFO;
@@ -543,12 +553,12 @@ int main(int argc, char *argv[]) {
 	char sipcid[32];
 
 
-	if (dial[0]){
-	pjsua_call_id callid;
+	//if (dial[0]){
+	//pjsua_call_id callid;
 	
-	status = pjsua_call_make_call(acc_id, &uri, 0, NULL, NULL, &callid);
-	if (status != PJ_SUCCESS) error_exit("Error making call", status);
-	}
+	//status = pjsua_call_make_call(acc_id, &uri, 0, NULL, NULL, &callid);
+	//if (status != PJ_SUCCESS) error_exit("Error making call", status);
+	//}
 	
 	//hack to start socket
 	//pjsua_conf_add_port(pool,&port.base,&blank_port_id);
@@ -557,8 +567,33 @@ int main(int argc, char *argv[]) {
 
 
 	struct timespec ts = {100, 0};
+	struct timeval stmo;
+	fd_set srset,seset;
+	int sret,scount;
+	int sip_max_fd;
+
+	stmo.tv_sec = 0;
+	stmo.tv_usec = 2000;
+
 	while(1) {
-		printf("loop?\n");
+		//printf("loop?\n");
+
+		FD_ZERO(&srset);
+		FD_ZERO(&seset);
+		FD_SET(atoi(argv[3]),&srset);
+		FD_SET(atoi(argv[3]),&seset);
+		sret = select(atoi(argv[3]) + 1,&srset,NULL,&seset,&stmo);
+
+        if (sret < 0) {
+			printf("dmm: sret < 0/s");
+			if (errno == EINTR)
+				continue;
+            printf("sselect: %s\n",strerror(errno));
+                return sret;
+                }				
+
+		if (sret == 0) continue;
+
 		int len;
 		if ((len=read(atoi(argv[3]), &sip_socket_frame, sizeof(sip_socket_frame))) != sizeof(sip_socket_frame)) {
 			//error_exit("error reading frame",0);
@@ -578,6 +613,12 @@ int main(int argc, char *argv[]) {
 					packet++;
 
 					printf("dmm:packet:M:%s\n",packet);
+					if (strncmp(packet,"A",1) == 0){
+						//Answer SIP Call...
+						answercall = 1;
+						
+						//pjsua_call_answer(call_id, 200, NULL, NULL);
+					}
 					if (strncmp(packet,"H",1) == 0){
 						packet++;
 						printf("dmm:packet:H:%s\n",packet);
