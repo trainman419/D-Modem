@@ -112,6 +112,16 @@ To stop data transmission, first escape from on-line mode (+++), then hang up:
     +++
     ath
 
+Commands to pass modem terminal through to a VM (eg Windows) from an LXC container (running SLModem). VM will need serial device.
+
+    ;on proxmox/qemu host
+    # socat -d -d TCP-L:[TCP PORT] UNIX-CLIENT:/var/run/qemu-server/[guest id].serial0
+
+    ;on slmodem container or machine
+    # socat -d -d TCP:[IP OF QEMU]:[TCP PORT] /dev/ttySL0[1,2...],b[BAUD RATE such as 115200],raw,echo=0
+
+In the VM, open a terminal program and dial out to another modem using the serial port.
+
 ## Known Issues / Future Work
 - Additional logging/error handling is needed 
 - The serial interface could be replaced with stdio or a socket, and common AT configuration options could be exposed as command line options 
