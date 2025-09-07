@@ -16,7 +16,7 @@ https://www.aon.com/cyber-solutions/aon_cyber_labs/introducing-d-modem-a-softwar
  - d-modem can now be called and signals the pty terminal to allow answering
 
 ## Building
-You'll need Linux and a working 32-bit development environment (gcc -m32 needs to work, Debian-based systems can install: libc6-dev-i386 gcc-multilib), along with PJSIP's dependencies (OpenSSL).  Then run 'make' from the top-level directory.
+You'll need Linux and a working 32-bit development environment (gcc -m32 needs to work, Debian-based systems can install: git gcc build-essential libc6-dev-i386 gcc-multilib pkg-config), along with PJSIP's dependencies (OpenSSL).  Then run 'make' from the top-level directory.
 
 ## How it Works
 Traditional “controller-based” modems generally used a microcontroller and a DSP to handle all aspects of modem communication on the device itself.  Later, so-called “Winmodems” were introduced that allowed for field-programmable DSPs and moved the controller and other functionality into software running on the host PC.  This was followed by “pure software” modems that moved DSP functionality to the host as well.  The physical hardware of these softmodems was only used to connect to the phone network, and all processing was done in software. 
