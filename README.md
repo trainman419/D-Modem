@@ -122,6 +122,8 @@ Commands to pass modem terminal through to a VM (eg Windows) from an LXC contain
 
 In the VM, open a terminal program and dial out to another modem using the serial port.
 
+![image showing Windows XP in a Proxmox VM while a SSH terminal shows D-Modem running](doc/d-modem%20xp.png?raw=true)
+
 ## Known Issues / Future Work
 - Additional logging/error handling is needed 
 - The serial interface could be replaced with stdio or a socket, and common AT configuration options could be exposed as command line options 
