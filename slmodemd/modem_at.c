@@ -78,7 +78,7 @@
 #include <modem.h>
 #include <modem_debug.h>
 
-#define AT_DBG(fmt...) // dprintf("at: " fmt)
+#define AT_DBG(fmt...) dprintf("at: " fmt)
 
 
 /* ------------------------------------------------------------ */
@@ -160,12 +160,14 @@ static int process_D(struct modem *m, char *p, int *len)
 	switch (toupper(*p)) {
 	case 'T':
 		modem_set_sreg(m,SREG_TONE_OR_PULSE,1);
+		p++;
 		break;
 	case 'P':
 #ifdef NO_PULSE_DIAL
 		return -1;
 #endif
 		modem_set_sreg(m,SREG_TONE_OR_PULSE,0);
+		p++;
 		break;
 	case 'L':
 		if(m->dial_string) {
