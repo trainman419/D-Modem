@@ -329,8 +329,8 @@ enum DP_ID {
         DP_DUMMY = 3,
         DP_AUTOMODE = 4,
         DP_V8 = 8,
-	DP_V17 = 17,
-	DP_V21 = 21,
+        DP_V17 = 17,
+        DP_V21 = 21,
         DP_V22 = 22,
         DP_V23 = 23,
         DP_V22BIS = 122,
@@ -349,7 +349,7 @@ enum DP_ID {
         DP_V92 = 92,
         DP_TEST  = 126,
         DP_SINUS = 127,
-	DP_MAX = 128,
+        DP_MAX = 128,
         MAX_DP = 128
 };
 

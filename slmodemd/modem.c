@@ -272,10 +272,10 @@ static void modem_report_result(struct modem *m, enum MODEM_RESULT code)
         const char *msg;
 	u8 msg_mask;
 
-        MODEM_DBG("modem report result: %d (%s)\n",code,MODEM_RESPONSE_TEXT(code));
-        if (IS_QUIET(m))
-                return;
-        if (IS_VERBOSE(m)) {
+	MODEM_DBG("modem report result: %d (%s)\n",code,MODEM_RESPONSE_TEXT(code));
+	if (IS_QUIET(m))
+		return;
+	if (IS_VERBOSE(m)) {
 		if(code==RESULT_CONNECT) {
 			msg_mask = modem_get_sreg(m,SREG_CONNNECT_MSG_FORMAT);
 			if(msg_mask&1) {
@@ -306,7 +306,7 @@ static void modem_report_result(struct modem *m, enum MODEM_RESULT code)
 				modem_put_chars(m,CRLF_CHARS(m),2);
 			}
 		}
-                msg = MODEM_RESPONSE_TEXT(code);
+		msg = MODEM_RESPONSE_TEXT(code);
 		modem_put_chars(m,msg,strlen(msg));
 		if (code==RESULT_CONNECT && m->mode == MODEM_MODE_DATA
 		    && m->rx_rate && modem_get_sreg(m,SREG_X_CODE) != 0) {
@@ -314,12 +314,12 @@ static void modem_report_result(struct modem *m, enum MODEM_RESULT code)
 			sprintf(rate_str," %d",m->rx_rate);
 			modem_put_chars(m,rate_str,strlen(rate_str));
 		}
-        }
-        else {
-                msg = MODEM_RESPONSE_CODE(code);
+	}
+	else {
+		msg = MODEM_RESPONSE_CODE(code);
 		modem_put_chars(m,msg,strlen(msg));
-        }
-        modem_put_chars(m,CRLF_CHARS(m),2);
+	}
+	modem_put_chars(m,CRLF_CHARS(m),2);
 }
 
 

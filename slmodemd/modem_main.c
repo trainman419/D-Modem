@@ -69,15 +69,6 @@
 
 #define ENOIOCTLCMD 515
 
-#ifdef SUPPORT_ALSA
-#define ALSA_PCM_NEW_HW_PARAMS_API 1
-#define ALSA_PCM_NEW_SW_PARAMS_API 1
-#include <alsa/asoundlib.h>
-/* buffer size in periods */
-#define BUFFER_PERIODS		12
-#define SHORT_BUFFER_PERIODS	4
-#endif
-
 #include <modem.h>
 #include <modem_debug.h>
 
@@ -95,8 +86,6 @@
 
 
 /* modem init externals : FIXME remove it */
-extern int  dp_dummy_init(void);
-extern void dp_dummy_exit(void);
 extern int  dp_sinus_init(void);
 extern void dp_sinus_exit(void);
 extern int  prop_dp_init(void);
@@ -124,17 +113,6 @@ extern const char *modem_exec;
 struct device_struct {
 	int num;
 	int fd;
-#ifdef SUPPORT_ALSA
-	snd_pcm_t *phandle;
-	snd_pcm_t *chandle;
-	snd_mixer_t *mhandle;
-	snd_mixer_elem_t *hook_off_elem;
-	snd_mixer_elem_t *cid_elem;
-	snd_mixer_elem_t *speaker_elem;
-	unsigned int period;
-	unsigned int buf_periods;
-	unsigned int started;
-#endif
 	int delay;
 	int sipfd;
 };
@@ -146,429 +124,9 @@ static char outbuf[4096];
 static pid_t pid = 0;
 static int modem_volume = 0;
 static int sip_modem_hookstate = 0;
-static bool sip_ringing = false;
-static bool sip_hangup = false;
+static int sip_ringing = 0;
 static void *rcSIPtoMODEM = NULL;
 static void *rcMODEMtoSIP = NULL;
-
-/*
- *    ALSA 'driver'
- *
- */
-
-#ifdef SUPPORT_ALSA
-
-#define INTERNAL_DELAY 40 /* internal device tx/rx delay: should be selfdetectible */
-
-extern unsigned use_alsa;
-static snd_output_t *DBG_out = NULL;
-
-static int alsa_mixer_setup(struct device_struct *dev, const char *dev_name)
-{
-	char card_name[32];
-	int card_num = 0;
-	char *p;
-	snd_mixer_elem_t *elem;
-	int err;
-
-	if((p = strchr(dev_name, ':')))
-		card_num = strtoul(p+1, NULL, 0);
-	sprintf(card_name, "hw:%d", card_num);
-	
-	err = snd_mixer_open(&dev->mhandle, 0);
-	if(err < 0) {
-		DBG("mixer setup: cannot open: %s\n", snd_strerror(err));
-		return err;
-	}
-	err = snd_mixer_attach(dev->mhandle, card_name);
-	if (err < 0) {
-		ERR("mixer setup: attach %s error: %s\n", card_name, snd_strerror(err));
-		goto error;
-	}
-	err = snd_mixer_selem_register(dev->mhandle, NULL, NULL);
-	if (err <0) {
-		ERR("mixer setup: register %s error: %s\n", card_name, snd_strerror(err));
-		goto error;
-	}
-	err = snd_mixer_load(dev->mhandle);
-	if (err < 0) {
-		ERR("mixer setup: load %s error: %s\n", card_name, snd_strerror(err));
-		goto error;
-	}
-	
-	for (elem = snd_mixer_first_elem(dev->mhandle) ; elem; elem = snd_mixer_elem_next(elem)) {
-		if(strcmp(snd_mixer_selem_get_name(elem),"Off-hook") == 0)
-			dev->hook_off_elem = elem;
-		else if(strcmp(snd_mixer_selem_get_name(elem),"Caller ID") == 0)
-			dev->cid_elem = elem;
-		else if(strcmp(snd_mixer_selem_get_name(elem),"Modem Speaker") == 0)
-			dev->speaker_elem = elem;
-	}
-
-	if(dev->hook_off_elem)
-		return 0;
-
-error:
-	snd_mixer_close(dev->mhandle);
-	dev->mhandle = NULL;
-	if (!err) {
-		ERR("mixer setup: Off-hook switch not found for card %s\n", card_name);
-		err = -ENODEV;
-	}
-	return err;
-}
-
-static int alsa_device_setup(struct device_struct *dev, const char *dev_name)
-{
-	struct pollfd pfd;
-	int ret;
-	memset(dev,0,sizeof(*dev));
-
-	ret = alsa_mixer_setup(dev, dev_name);
-	if(ret < 0)
-		DBG("alsa setup: cannot setup mixer: %s\n", snd_strerror(ret));
-
-	ret = snd_pcm_open(&dev->phandle, dev_name, SND_PCM_STREAM_PLAYBACK, SND_PCM_NONBLOCK);
-	if(ret < 0) {
-		ERR("alsa setup: cannot open playback device '%s': %s\n",
-		    dev_name, snd_strerror(ret));
-		return -1;
-	}
-	ret = snd_pcm_open(&dev->chandle, dev_name, SND_PCM_STREAM_CAPTURE, SND_PCM_NONBLOCK);
-	if(ret < 0) {
-		ERR("alsa setup: cannot open playback device '%s': %s\n",
-		    dev_name, snd_strerror(ret));
-		return -1;
-	}
-	ret = snd_pcm_poll_descriptors(dev->chandle, &pfd, 1);
-	if(ret <= 0) {
-		ERR("alsa setup: cannot get poll descriptors of '%s': %s\n",
-		    dev_name, snd_strerror(ret));
-		return -1;
-	}
-	dev->fd = pfd.fd;
-	dev->num = 0; /* <-- FIXME */
-
-	if(modem_debug_level > 0)
-		snd_output_stdio_attach(&DBG_out,stderr,0);
-
-	return 0;
-}
-
-static int alsa_device_release(struct device_struct *dev)
-{
-	snd_pcm_close (dev->phandle);
-	snd_pcm_close (dev->chandle);
-	if (dev->mhandle) {
-		if (dev->hook_off_elem)
-			snd_mixer_selem_set_playback_switch_all(dev->hook_off_elem, 0);
-		if (dev->cid_elem)
-			snd_mixer_selem_set_playback_switch_all(dev->cid_elem, 0);
-		if (dev->speaker_elem)
-			snd_mixer_selem_set_playback_switch_all(dev->speaker_elem, 0);
-		snd_mixer_close(dev->mhandle);
-	}
-	return 0;
-}
-
-
-static int alsa_xrun_recovery(struct device_struct *dev)
-{
-	int err;
-	int len;
-	DBG("alsa xrun: try to recover...\n");
-	err = snd_pcm_prepare(dev->phandle);
-	if (err < 0) {
-		ERR("xrun recovery: cannot prepare playback: %s\n", snd_strerror(err));
-		return err;
-	}
-	len = dev->delay - INTERNAL_DELAY;
-	snd_pcm_format_set_silence(SND_PCM_FORMAT_S16_LE, outbuf, len);
-	err = snd_pcm_writei(dev->phandle, outbuf, len);
-	if (err < 0) {
-		ERR("xrun recovery: write error: %s\n", snd_strerror(err));
-		return err;
-	}
-	err = snd_pcm_start(dev->chandle);
-	if(err < 0) {
-		ERR("xrun recovcery snd_pcm_start error: %s\n", snd_strerror(err));
-		return err;
-	}
-	DBG("alsa xrun: recovered.\n");
-	return 0;
-}
-
-
-static int alsa_device_read(struct device_struct *dev, char *buf, int count)
-{
-	int ret;
-	do {
-		ret = snd_pcm_readi(dev->chandle,buf,count);
-		if (ret == -EPIPE) {
-			ret = alsa_xrun_recovery(dev);
-			break;
-		}
-	} while (ret == -EAGAIN);
-#if 0
-	if(ret != dev->period)
-		DBG("alsa_device_read (%d): %d ...\n",count,ret);
-#endif
-	return ret ;
-}
-
-static int alsa_device_write(struct device_struct *dev, const char *buf, int count)
-{
-	int written = 0;
-	if(!dev->started)
-		return 0;
-	while(count > 0) {
-		int ret = snd_pcm_writei(dev->phandle,buf,count);
-		if(ret < 0) {
-			if (ret == -EAGAIN)
-				continue;
-			if (ret == -EPIPE) {
-			    	ret = alsa_xrun_recovery(dev);
-			}
-			written = ret;
-			break;
-		}
-		count -= ret;
-		buf += ret;
-		written += ret;
-	}
-#if 0
-	if(written != dev->period)
-		DBG("alsa_device_write (%d): %d...\n",asked,written);
-#endif
-	return written;
-}
-
-
-static snd_pcm_format_t mdm2snd_format(unsigned mdm_format)
-{
-	if(mdm_format == MFMT_S16_LE)
-		return SND_PCM_FORMAT_S16_LE;
-	return SND_PCM_FORMAT_UNKNOWN;
-}
-
-
-static int setup_stream(snd_pcm_t *handle, struct modem *m, const char *stream_name)
-{
-	struct device_struct *dev = m->dev_data;
-	snd_pcm_hw_params_t *hw_params;
-	snd_pcm_sw_params_t *sw_params;
-	snd_pcm_format_t format;
-	unsigned int rate, rrate;
-	snd_pcm_uframes_t size, rsize;
-	int err;
-
-	err = snd_pcm_hw_params_malloc(&hw_params);
-	if (err < 0) {
-		ERR("cannot alloc hw params for %s: %s\n", stream_name, snd_strerror(err));
-		return err;
-	}
-	err = snd_pcm_hw_params_any(handle,hw_params);
-	if (err < 0) {
-		ERR("cannot init hw params for %s: %s\n", stream_name, snd_strerror(err));
-		return err;
-	}
-	err = snd_pcm_hw_params_set_access(handle, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED);
-	if (err < 0) {
-		ERR("cannot set access for %s: %s\n", stream_name, snd_strerror(err));
-		return err;
-	}
-	format = mdm2snd_format(m->format);
-	if(format == SND_PCM_FORMAT_UNKNOWN) {
-		ERR("unsupported format for %s\n",stream_name);
-		return -1;
-	}
-	err = snd_pcm_hw_params_set_format(handle, hw_params, format);
-	if (err < 0) {
-		ERR("cannot set format for %s: %s\n", stream_name, snd_strerror(err));
-		return err;
-	}
-        err = snd_pcm_hw_params_set_channels(handle, hw_params, 1);
-	if (err < 0) {
-		ERR("cannot set channels for %s: %s\n", stream_name, snd_strerror(err));
-		return err;
-	}
-	rrate = rate = m->srate;
-	err = snd_pcm_hw_params_set_rate_near(handle, hw_params, &rrate, 0);
-	if (err < 0) {
-		ERR("cannot set rate for %s: %s\n", stream_name, snd_strerror(err));
-		return err;
-	}
-	if ( rrate != rate ) {
-		ERR("rate %d is not supported by %s (%d).\n",
-		    rate, stream_name, rrate);
-		return -1;
-	}
-	rsize = size = dev->period ;
-	err = snd_pcm_hw_params_set_period_size_near(handle, hw_params, &rsize, NULL);
-	if (err < 0) {
-		ERR("cannot set periods for %s: %s\n", stream_name, snd_strerror(err));
-		return err;
-	}
-	if ( rsize < size ) {
-		ERR("period size %ld is not supported by %s (%ld).\n",
-		    size, stream_name, rsize);
-		return -1;		
-	}
-	rsize = size = use_short_buffer ? rsize * dev->buf_periods : rsize * 32;
-	err = snd_pcm_hw_params_set_buffer_size_near(handle, hw_params, &rsize);
-	if (err < 0) {
-		ERR("cannot set buffer for %s: %s\n", stream_name, snd_strerror(err));
-		return err;
-	}
-	if ( rsize != size ) {
-		DBG("buffer size for %s is changed %ld -> %ld\n",
-		    stream_name, size, rsize);
-	}
-	err = snd_pcm_hw_params(handle, hw_params);
-	if (err < 0) {
-		ERR("cannot setup hw params for %s: %s\n", stream_name, snd_strerror(err));
-		return err;
-	}
-	err = snd_pcm_prepare(handle);
-	if (err < 0) {
-		ERR("cannot prepare %s: %s\n", stream_name, snd_strerror(err));
-		return err;
-	}
-	snd_pcm_hw_params_free(hw_params);
-
-	err = snd_pcm_sw_params_malloc(&sw_params);
-	if (err < 0) {
-		ERR("cannot alloc sw params for %s: %s\n", stream_name, snd_strerror(err));
-		return err;
-	}
-	err = snd_pcm_sw_params_current(handle,sw_params);
-	if (err < 0) {
-		ERR("cannot get sw params for %s: %s\n", stream_name, snd_strerror(err));
-		return err;
-	}
-	err = snd_pcm_sw_params_set_start_threshold(handle, sw_params, INT_MAX);
-	if (err < 0) {
-		ERR("cannot set start threshold for %s: %s\n", stream_name, snd_strerror(err));
-		return err;
-	}
-	err = snd_pcm_sw_params_set_avail_min(handle, sw_params, 4);
-	if (err < 0) {
-		ERR("cannot set avail min for %s: %s\n", stream_name, snd_strerror(err));
-		return err;
-	}
-	err = snd_pcm_sw_params_set_xfer_align(handle, sw_params, 4);
-	if (err < 0) {
-		ERR("cannot set align for %s: %s\n", stream_name, snd_strerror(err));
-		return err;
-	}
-	err = snd_pcm_sw_params(handle, sw_params);
-	if (err < 0) {
-		ERR("cannot set sw params for %s: %s\n", stream_name, snd_strerror(err));
-		return err;
-	}
-	snd_pcm_sw_params_free(sw_params);
-
-	if(modem_debug_level > 0)
-		snd_pcm_dump(handle,DBG_out);
-	return 0;
-}
-
-static int alsa_start (struct modem *m)
-{
-	struct device_struct *dev = m->dev_data;
-	int err, len;
-	DBG("alsa_start...\n");
-	dev->period = m->frag;
-	dev->buf_periods = use_short_buffer ? SHORT_BUFFER_PERIODS : BUFFER_PERIODS;
-	err = setup_stream(dev->phandle, m, "playback");
-	if(err < 0)
-		return err;
-	err = setup_stream(dev->chandle, m, "capture");
-	if(err < 0)
-		return err;
-	dev->delay = 0;
-	len = use_short_buffer ? dev->period * dev->buf_periods : MODEM_FRAMESIZE * 2;
-	DBG("startup write: %d...\n",len);
-	err = snd_pcm_format_set_silence(SND_PCM_FORMAT_S16_LE, outbuf, len);
-	if(err < 0) {
-		ERR("silence error\n");
-		return err;
-	}
-	
-	err = snd_pcm_writei(dev->phandle,outbuf,len);
-	if(err < 0) {
-		ERR("startup write error\n");
-		return err;
-	}
-	dev->delay = err;
-	dev->delay += INTERNAL_DELAY; /* <-- fixme: delay detection is needed */
-	err = snd_pcm_link(dev->chandle, dev->phandle);
-	if(err < 0) {
-		ERR("snd_pcm_link error: %s\n", snd_strerror(err));
-		return err;
-	}
-	err = snd_pcm_start(dev->chandle);
-	if(err < 0) {
-		ERR("snd_pcm_start error: %s\n", snd_strerror(err));
-		return err;
-	}
-	dev->started = 1;
-	return 0;
-}
-
-static int alsa_stop (struct modem *m)
-{
-	struct device_struct *dev = m->dev_data;
-	DBG("alsa_stop...\n");
-	dev->started = 0;
-	snd_pcm_drop(dev->chandle);
-	snd_pcm_nonblock(dev->phandle, 0);
-	snd_pcm_drain(dev->phandle);
-	snd_pcm_nonblock(dev->phandle, 1);
-	snd_pcm_unlink(dev->chandle);
-	snd_pcm_hw_free(dev->phandle);
-	snd_pcm_hw_free(dev->chandle);
-	return 0;
-}
-
-static int alsa_ioctl(struct modem *m, unsigned int cmd, unsigned long arg)
-{
-	/* TODO */
-	struct device_struct *dev = m->dev_data;
-	DBG("alsa_ioctl: cmd %x, arg %lx...\n",cmd,arg);
-	switch(cmd) {
-        case MDMCTL_CAPABILITIES:
-                return -EINVAL;
-        case MDMCTL_HOOKSTATE:
-		return (dev->hook_off_elem) ?
-			snd_mixer_selem_set_playback_switch_all(
-				dev->hook_off_elem,
-				(arg == MODEM_HOOK_OFF) ) : 0 ;
-	case MDMCTL_SPEAKERVOL:
-		return (dev->speaker_elem) ?
-			snd_mixer_selem_set_playback_volume_all(
-					dev->speaker_elem, arg) : 0 ;
-        case MDMCTL_CODECTYPE:
-                return CODEC_SILABS;
-        case MDMCTL_IODELAY:
-		DBG("delay = %d\n", dev->delay);
-		return dev->delay;
-	default:
-		return 0;
-	}
-	return -EINVAL;
-}
-
-
-struct modem_driver alsa_modem_driver = {
-        .name = "alsa modem driver",
-        .start = alsa_start,
-        .stop = alsa_stop,
-        .ioctl = alsa_ioctl,
-};
-
-
-#endif
 
 
 /*
@@ -1248,27 +806,30 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 			scount = read(dev->sipfd, &sip_socket_frame, sizeof(sip_socket_frame));
 			char *packet;
 			packet = sip_socket_frame.data.sip.info;
-			//DBG("sip msg scount %d",scount);
+			DBG("sip msg scount %d",scount);
 			//DBG("sip msg: %s\n",packet);
 			if (strncmp(packet,"S",1) == 0){
-				//DBG("SIP CMD RECEIVED");
+				DBG("SIP CMD RECEIVED");
 				packet++;
 				if (strncmp(packet,"R",1) == 0) {
-					sip_ringing = true;
+          // Line is ringing.
+					sip_ringing = 1;
 				} else if (strncmp(packet, "H", 0) == 0) {
-					sip_hangup = true;
+          // Hang up modem.
+          DBG("SIP call disconnected");
+          modem_hangup(m);
 				}
 			}
 		}
 		//DBG("keep_running scount val %d",scount);				
 		//DBG("check sip ring loop");
-		if(sip_ringing == true){
+		if(sip_ringing == 1){
 			modem_send_to_tty(m,"RING",4);
 			modem_send_to_tty(m,CRLF_CHARS(m),2);
 			DBG("TTY RING!!");
 			modem_send_to_tty(m,"RING",4);
 			modem_send_to_tty(m,CRLF_CHARS(m),2);
-			sip_ringing = false;
+			sip_ringing = 0;
 		}
 
 
@@ -1472,7 +1033,6 @@ int modem_main(const char *dev_name)
 		exit(-1);
 	}
 
-	dp_dummy_init();
 	dp_sinus_init();
 	prop_dp_init();
 	modem_timer_init();
@@ -1597,7 +1157,6 @@ int modem_main(const char *dev_name)
 	if(*link_name)
 		unlink(link_name);
 	
-	dp_dummy_exit();
 	dp_sinus_exit();
 	prop_dp_exit();
 

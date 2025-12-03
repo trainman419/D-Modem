@@ -18,7 +18,6 @@ ARCH64:=$(shell uname -m | sed -e '/amd64/s//x86_64/' | grep -c x86_64)
 ifeq ($(ARCH64), 0)
 CC:= gcc
 else
-# SUPPORT_ALSA:=1
 CC:= gcc -m32
 endif
 
@@ -38,16 +37,6 @@ all: slmodemd modem_test
 
 slmodemd: modem_main.o $(all-objs)
 modem_test: modem_test.o $(all-objs)
-
-ifdef SUPPORT_ALSA
-CFLAGS+= -DSUPPORT_ALSA=1
-ifeq ($(ARCH64), 0)
-LFLAGS+= /usr/lib/libasound.so
-else
-# LFLAGS+= /usr/lib32/libasound.so , replaced by -l commands search for asound
-LFLAGS+= -lasound
-endif
-endif
 
 slmodemd:
 	$(CC) -o slmodemd modem_main.o $(all-objs) $(LFLAGS)
