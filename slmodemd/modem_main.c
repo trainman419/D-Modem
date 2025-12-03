@@ -129,62 +129,6 @@ static void *rcSIPtoMODEM = NULL;
 static void *rcMODEMtoSIP = NULL;
 
 
-/*
- *    'driver' stuff
- *
- */
-
-static int modemap_start (struct modem *m)
-{
-	struct device_struct *dev = m->dev_data;
-	int ret;
-	DBG("modemap_start...\n");
-	dev->delay = 0;
-        ret = ioctl(dev->fd,100000+MDMCTL_START,0);
-	if (ret < 0)
-		return ret;
-	ret = MODEM_FRAMESIZE * 2;
-	memset(outbuf, 0 , ret);
-	ret = write(dev->fd, outbuf, ret);
-	if (ret < 0) {
-		ioctl(dev->fd,100000+MDMCTL_STOP,0);
-		return ret;
-	}
-	dev->delay = ret/2;
-	return 0;
-}
-
-static int modemap_stop (struct modem *m)
-{
-	struct device_struct *dev = m->dev_data;
-	DBG("modemap_stop...\n");
-        return ioctl(dev->fd,100000+MDMCTL_STOP,0);
-}
-
-static int modemap_ioctl(struct modem *m, unsigned int cmd, unsigned long arg)
-{
-	struct device_struct *dev = m->dev_data;
-	int ret;
-	DBG("modemap_ioctl: cmd %x, arg %lx...\n",cmd,arg);
-	if (cmd == MDMCTL_SETFRAG)
-		arg <<= MFMT_SHIFT(m->format);
-	ret = ioctl(dev->fd,cmd+100000,&arg);
-	if (cmd == MDMCTL_IODELAY && ret > 0) {
-		ret >>= MFMT_SHIFT(m->format);
-		ret += dev->delay;
-	}
-	return ret;
-}
-
-
-
-struct modem_driver mdm_modem_driver = {
-        .name = "modemap driver",
-        .start = modemap_start,
-        .stop = modemap_stop,
-        .ioctl = modemap_ioctl,
-};
-
 //init socket
 static int socket_start (struct modem *m)
 {
@@ -861,12 +805,6 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 			unsigned stat;
 			unsigned sstat;
 			DBG("dev exception...\n");
-#ifdef SUPPORT_ALSA
-			if(use_alsa) {
-				DBG("dev exception...\n");
-				continue;
-			}
-#endif
 			ret = ioctl(dev->fd,100000+MDMCTL_GETSTAT,&stat);
 			//DBG("keep_running ioctl ret %d",ret);
 			sret = ioctl(dev->sipfd,100000+MDMCTL_GETSTAT,&sstat);
@@ -1135,18 +1073,13 @@ int modem_main(const char *dev_name)
 	     *link_name ? link_name : m->pty_name);
 
 	//start socket		 
-	
 	socket_start(m);
 
 	/* main loop here */
 	DBG("Modem_Run loop begin...\n");
 	ret = modem_run(m,&device);
 
-
 	//close socket
-	
-	
-
 	datafile_save_info(path_name,&m->dsp_info);
 
 	pty = m->pty;
@@ -1168,9 +1101,6 @@ int modem_main(const char *dev_name)
 	return 0;
 }
 
-
-
-
 int main(int argc, char *argv[])
 {
 	extern void modem_cmdline(int argc, char *argv[]);
@@ -1184,16 +1114,6 @@ int main(int argc, char *argv[])
 	sipdevice_read = sip_device_read;
 	device_write = mdm_device_write;
 	modem_driver = &socket_modem_driver;
-
-#ifdef SUPPORT_ALSA
-	if(use_alsa) {
-		device_setup = alsa_device_setup;
-		device_release = alsa_device_release;
-		device_read = alsa_device_read;
-		device_write = alsa_device_write;
-		modem_driver = &alsa_modem_driver;
-	}
-#endif
 
 	ret = modem_main(modem_dev_name);
 	return ret;
