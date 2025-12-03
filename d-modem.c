@@ -333,7 +333,11 @@ int main(int argc, char *argv[]) {
 	printf("dmodem starting..\n");
 	signal(SIGPIPE,SIG_IGN);
 
-	printf("args: %s %s %s %s\n",argv[1],argv[2],argv[3],argv[4]);
+	printf("argc: %d\n", argc);
+	for (int i=0; i<argc; i++) {
+		printf(" argv[%d]: %s\n", i, argv[i]);
+	}
+
 
 	char *dialstr = argv[1];
 	sipsocket = atoi(argv[3]);
@@ -380,7 +384,7 @@ int main(int argc, char *argv[]) {
 		cfg.cb.on_call_state = &on_call_state;
 		cfg.cb.on_incoming_call = &on_incoming_call;
 		pjsua_logging_config_default(&log_cfg);
-		log_cfg.console_level = 4;
+		log_cfg.console_level = 3;
 
 		pjsua_media_config_default(&med_cfg);
 		med_cfg.clock_rate = SIP_RATE;
@@ -515,12 +519,6 @@ int main(int argc, char *argv[]) {
 		
 	}
 
-
-	//handle atdt and atdp
-	//if (dial[0] == 't' || dial[0] == 'T' ||
-	//    dial[0] == 'p' || dial[0] == 'P') {
-	//	dial++;
-	//}
 
 	//if (!direct_call) {
 	//	snprintf(buf,sizeof(buf),"sip:%s@%s",dial,sip_domain);
