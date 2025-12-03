@@ -153,6 +153,8 @@ static pj_status_t dmodem_on_destroy(pjmedia_port *this_port) {
 static void on_call_state(pjsua_call_id call_id, pjsip_event *e) {
 	printf("on_call_state: callback\n");
 	pjsua_call_info ci;
+	struct socket_frame sip_socket_frame = { 0 };
+	int ret = 0;
 
 	PJ_UNUSED_ARG(e);
 
@@ -161,26 +163,15 @@ static void on_call_state(pjsua_call_id call_id, pjsip_event *e) {
 				(int)ci.state_text.slen,
 				ci.state_text.ptr));
 
-	if (ci.state ==PJSIP_INV_STATE_DISCONNECTED) {
+	if (ci.state == PJSIP_INV_STATE_DISCONNECTED) {
 		//hup modem when disconnected
 		printf("on_call_state: call disconnected\n");
+		sip_socket_frame.type = SOCKET_FRAME_SIP_INFO;
 		snprintf(sip_socket_frame.data.sip.info,256,"SH");
 		ret = write(sipsocket,&sip_socket_frame, sizeof(sip_socket_frame));
 		printf("sip socket write %i\n",ret);
 	}
-
-	//if (ci.state == PJSIP_INV_STATE_DISCONNECTED) {
-	//	close(port.sock);
-	//	if (!destroying) {
-	//		destroying = true;
-	//		pjsua_destroy();
-	//		exit(0);
-	//	}
-	//}
 }
-
-
-
 
 /* Callback called by the library when call's media state has changed */
 static void on_call_media_state(pjsua_call_id call_id) {
