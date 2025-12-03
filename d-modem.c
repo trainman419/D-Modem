@@ -177,28 +177,54 @@ static void on_call_state(pjsua_call_id call_id, pjsip_event *e) {
 	}
 }
 
+pjsua_conf_port_id current_conf_slot = -1;
+
 /* Callback called by the library when call's media state has changed */
 static void on_call_media_state(pjsua_call_id call_id) {
 	printf("on_call_media_state: callback\n");
+#ifdef WITH_AUDIO
 	pjmedia_snd_port *audiodev;
 	pjmedia_port *sc, *left, *right;
 	pjmedia_aud_dev_index devidx = -1;
+#endif
 	pjsua_call_info ci;
 	pjsua_conf_port_id port_id;
-	static int done=0;
 
 	pjsua_call_get_info(call_id, &ci);
 
-	printf("media_status %d media_cnt %d ci.conf_slot %d aud.conf_slot %d\n",ci.media_status,ci.media_cnt,ci.conf_slot,ci.media[0].stream.aud.conf_slot);
+	printf("media_status %d call_id: %d media_cnt %d ci.conf_slot %d aud.conf_slot %d\n",
+			ci.media_status,
+			call_id,
+			ci.media_cnt,
+			ci.conf_slot,
+			ci.media[0].stream.aud.conf_slot
+			);
+	printf("media_status call status %s\n", ci.state_text.ptr);
+
 	if (ci.media_status == PJSUA_CALL_MEDIA_ACTIVE) {
-		if (!done) {
-			struct socket_frame socket_frame = { 0 };
-			if (pjsua_conf_add_port(pool, &port.base, &port_id) != PJ_SUCCESS)
-				error_exit("can't add modem port",0);
+		if (ci.conf_slot != current_conf_slot) {
+			//struct socket_frame socket_frame = { 0 };
+			if (current_conf_slot < 0) {
+				printf("media_status setting up conference bridge\n");
+				if (pjsua_conf_add_port(pool, &port.base, &port_id) != PJ_SUCCESS)
+					error_exit("can't add modem port",0);
+			} else {
+				printf("media_status updating conference slot in bridge\n");
+			}
+
 			if (pjsua_conf_connect(ci.conf_slot, port_id) != PJ_SUCCESS)
 				error_exit("can't connect modem port (out)",0);
 			if (pjsua_conf_connect(port_id, ci.conf_slot) != PJ_SUCCESS)
 				error_exit("can't connect modem port (in)",0);
+
+			// disconnect previous audio
+			if (current_conf_slot >= 0) {
+				if (pjsua_conf_disconnect(current_conf_slot, port_id) != PJ_SUCCESS)
+					error_exit("can't connect modem port (out)",0);
+				if (pjsua_conf_disconnect(port_id, current_conf_slot) != PJ_SUCCESS)
+					error_exit("can't connect modem port (in)",0);
+			}
+			current_conf_slot = ci.conf_slot;
 
 			//pjsua_conf_adjust_rx_level(port_id, 1.0);
 			//pjsua_conf_adjust_rx_level(ci.conf_slot, 1.0);
@@ -239,11 +265,18 @@ static void on_call_media_state(pjsua_call_id call_id) {
 
 			//Kick off audio
 			printf("Kicking off audio!\n");
-			socket_frame.type = SOCKET_FRAME_AUDIO;
-			write(port.sock, &socket_frame, sizeof(socket_frame));
+			//socket_frame.type = SOCKET_FRAME_AUDIO;
+			//write(port.sock, &socket_frame, sizeof(socket_frame));
 
-			done = 1;
+		} else {
+			printf("media_status ACTIVE called when media already active\n");
 		}
+	} else if (ci.media_status == PJSUA_CALL_MEDIA_LOCAL_HOLD) {
+		printf("media_status LOCAL_HOLD\n");
+	} else if (ci.media_status == PJSUA_CALL_MEDIA_REMOTE_HOLD) {
+		printf("media_status REMOTE_HOLD\n");
+	} else if (ci.media_status == PJSUA_CALL_MEDIA_ERROR) {
+		printf("media_status ERROR\n");
 	}
 }
 

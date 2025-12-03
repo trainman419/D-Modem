@@ -668,7 +668,7 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 			} else if (strncmp(packet, "SH", 3) == 0) {
 				// Hang up modem.
 				printf("SIP call disconnected\n");
-				//modem_hangup(m);
+				modem_hangup(m);
 				modem_hook(m, MODEM_HOOK_ON);
 				sip_modem_hookstate = 0;
 			}

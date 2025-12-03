@@ -9,7 +9,8 @@ $(PKG_CONFIG_PATH)/libpjproject.pc:
 	$(MAKE) -C $(PJSIP_DIR) install
 
 d-modem: d-modem.c $(PKG_CONFIG_PATH)/libpjproject.pc slmodemd/modem.h
-	$(CC) -DWITH_AUDIO -Wall -Islmodemd/ -o $@ $< `PKG_CONFIG_PATH="$(PKG_CONFIG_PATH)" pkg-config --static --cflags --libs libpjproject`
+	$(CC) -Wall -Islmodemd/ -o $@ $< `PKG_CONFIG_PATH="$(PKG_CONFIG_PATH)" pkg-config --static --cflags --libs libpjproject`
+	#$(CC) -DWITH_AUDIO -g -Wall -Islmodemd/ -o $@ $< `PKG_CONFIG_PATH="$(PKG_CONFIG_PATH)" pkg-config --static --cflags --libs libpjproject`
 
 slmodemd:
 	$(MAKE) -C slmodemd
