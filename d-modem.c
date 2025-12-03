@@ -74,7 +74,7 @@ static pj_status_t dmodem_put_frame(pjmedia_port *this_port, pjmedia_frame *fram
 	}
 
 	if (frame->type == PJMEDIA_FRAME_TYPE_AUDIO) {
-		//printf("dmodem:writing audio frame\n"); //super debug
+		printf("dmodem:writing audio frame\n"); //super debug
 		memcpy(socket_frame.data.audio.buf, frame->buf, frame->size);
 		socket_frame.type = SOCKET_FRAME_AUDIO;
 
@@ -108,7 +108,7 @@ static pj_status_t dmodem_get_frame(pjmedia_port *this_port, pjmedia_frame *fram
 
 		switch(socket_frame.type) {
 			case SOCKET_FRAME_AUDIO:
-				//printf("dmodem_get_frame: audio frame recieved\n");
+				printf("dmodem_get_frame: audio frame recieved\n");
 				len = frame->size;
 				memcpy(frame->buf, socket_frame.data.audio.buf, len);
 				frame->timestamp.u64 = sm->timestamp.u64;
@@ -163,7 +163,10 @@ static void on_call_state(pjsua_call_id call_id, pjsip_event *e) {
 
 	if (ci.state ==PJSIP_INV_STATE_DISCONNECTED) {
 		//hup modem when disconnected
-		// TODO
+		printf("on_call_state: call disconnected\n");
+		snprintf(sip_socket_frame.data.sip.info,256,"SH");
+		ret = write(sipsocket,&sip_socket_frame, sizeof(sip_socket_frame));
+		printf("sip socket write %i\n",ret);
 	}
 
 	//if (ci.state == PJSIP_INV_STATE_DISCONNECTED) {
@@ -191,7 +194,7 @@ static void on_call_media_state(pjsua_call_id call_id) {
 
 	pjsua_call_get_info(call_id, &ci);
 
-//	printf("media_status %d media_cnt %d ci.conf_slot %d aud.conf_slot %d\n",ci.media_status,ci.media_cnt,ci.conf_slot,ci.media[0].stream.aud.conf_slot);
+	printf("media_status %d media_cnt %d ci.conf_slot %d aud.conf_slot %d\n",ci.media_status,ci.media_cnt,ci.conf_slot,ci.media[0].stream.aud.conf_slot);
 	if (ci.media_status == PJSUA_CALL_MEDIA_ACTIVE) {
 		if (!done) {
 			struct socket_frame socket_frame = { 0 };
