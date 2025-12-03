@@ -559,7 +559,7 @@ int main(int argc, char *argv[]) {
 						sprintf(buf,"sip:%s@%s",sipcid,sip_domain);
 						pj_str_t sipuri = pj_str(buf);
 						printf("dmodem_main: new dialstring: %s \n",sipcid);
-						printf("dmodem_main: sip dialstring: %s \n",sipuri);
+						printf("dmodem_main: sip dialstring: %s \n",buf);
 
 						//check cid
 						if (sipcid[0]){
