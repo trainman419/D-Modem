@@ -450,35 +450,6 @@ static int mdm_device_read(struct device_struct *dev, char *buf, int size)
 	}
 }
 
-static int sip_device_read(struct device_struct *dev, char *buf, int size)
-{
-	struct socket_frame sip_socket_frame = { 0 };
-
-	if (size < MODEM_FRAMESIZE) {
-		return 0;
-	}
-	while(1) {
-		int ret = read(dev->sipfd, &sip_socket_frame, sizeof(sip_socket_frame));
-
-		if (ret < 0) {
-			return ret;
-		}
-
-		switch (sip_socket_frame.type) {
-			
-			case SOCKET_FRAME_SIP_INFO:
-				ERR("SIP_INFO_FRAME\n");
-				return 0;
-			default:
-				ERR("invalid frame received!\n");
-				break;
-		}
-	}
-
-	return 0;
-}
-
-
 static int mdm_device_write(struct device_struct *dev, const char *buf, int size)
 {
 	struct socket_frame socket_frame = { 0 };
@@ -507,33 +478,6 @@ static int mdm_device_write(struct device_struct *dev, const char *buf, int size
 
 	return ret;
 }
-
-#if 0
-static int mdm_device_setup(struct device_struct *dev, const char *dev_name)
-{
-	struct stat stbuf;
-	int ret, fd;
-	memset(dev,0,sizeof(*dev));
-	ret = stat(dev_name,&stbuf);
-	if(ret) {
-		ERR("mdm setup: cannot stat `%s': %s\n", dev_name, strerror(errno));
-		return -1;
-	}
-	if(!S_ISCHR(stbuf.st_mode)) {
-		ERR("mdm setup: not char device `%s'\n", dev_name);
-		return -1;
-	}
-	/* device stuff */
-	fd = open(dev_name,O_RDWR);
-	if(fd < 0) {
-		ERR("mdm setup: cannot open dev `%s': %s\n",dev_name,strerror(errno));
-		return -1;
-	}
-	dev->fd = fd;
-	dev->num = minor(stbuf.st_rdev);
-	return 0;
-}
-#endif
 
 static int mdm_device_release(struct device_struct *dev)
 {
@@ -641,12 +585,7 @@ int create_pty(struct modem *m)
  *
  */
 
-static int (*device_setup)(struct device_struct *dev, const char *dev_name);
 static int (*device_release)(struct device_struct *dev);
-static int (*device_read)(struct device_struct *dev, char *buf, int size);
-static int (*device_write)(struct device_struct *dev, const char *buf, int size);
-static int (*sipdevice_read)(struct device_struct *dev, char *buf, int size);
-static struct modem_driver *modem_driver;
 
 static volatile sig_atomic_t keep_running = 1;
 
@@ -825,7 +764,7 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 		//DBG("keep_running FD_ISSET fd rset before loop");
 		if(FD_ISSET(dev->fd, &rset)) {
 			//DBG("keep_running FD_ISSET fd rset set");
-			count = device_read(dev,inbuf,sizeof(inbuf)/2);
+			count = mdm_device_read(dev,inbuf,sizeof(inbuf)/2);
 
 			if(count <= 0) {
 				if (errno == ECONNRESET) {
@@ -860,7 +799,7 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 			modem_process(m,inbuf,outbuf,count);
 			errno = 0;
 			//DBG("keep_running device_write");
-			count = device_write(dev,outbuf,count);
+			count = mdm_device_write(dev,outbuf,count);
 			if(count < 0) {
 				if (errno == EPIPE) {
 				DBG("keep_running EPIPE");
@@ -877,7 +816,7 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 			if(m->update_delay > 0) {
 				DBG("change delay +%d...\n", m->update_delay);
 				memset(outbuf, 0, m->update_delay*2);
-				count = device_write(dev,outbuf,m->update_delay);
+				count = mdm_device_write(dev,outbuf,m->update_delay);
 				if(count < 0) {
 					ERR("1267 modem run dev write: %s\n",strerror(errno));
 					return -1;
@@ -965,7 +904,7 @@ int modem_main(const char *dev_name)
 
 	modem_debug_init(basename(dev_name));
 
-	ret = device_setup(&device, dev_name);
+	ret = socket_device_setup(&device, dev_name);
 	if (ret) {
 		ERR("cannot setup device `%s'\n", dev_name);
 		exit(-1);
@@ -981,7 +920,7 @@ int modem_main(const char *dev_name)
 		sprintf(link_name,"/tmp/ttySL%d", device.num);
 	}
 
-	m = modem_create(modem_driver,basename(dev_name));
+	m = modem_create(&socket_modem_driver,basename(dev_name));
 	m->name = basename(dev_name);
 	m->dev_data = &device;
 	m->dev_name = dev_name;
@@ -1093,7 +1032,7 @@ int modem_main(const char *dev_name)
 	dp_sinus_exit();
 	prop_dp_exit();
 
-	device_release(&device);
+	mdm_device_release(&device);
 
 	modem_debug_exit();
 	socket_stop(m);
@@ -1107,13 +1046,6 @@ int main(int argc, char *argv[])
 	int ret;
 	modem_cmdline(argc,argv);
 	if(!modem_dev_name) modem_dev_name = "/dev/slamr0";
-
-	device_setup = socket_device_setup;
-	device_release = mdm_device_release;
-	device_read = mdm_device_read;
-	sipdevice_read = sip_device_read;
-	device_write = mdm_device_write;
-	modem_driver = &socket_modem_driver;
 
 	ret = modem_main(modem_dev_name);
 	return ret;
