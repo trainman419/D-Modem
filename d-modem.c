@@ -269,20 +269,18 @@ static void on_incoming_call(pjsua_acc_id acc_id, pjsua_call_id call_id,
                              pjsip_rx_data *rdata)
 {
 	printf("on_incoming_call: callback\n");
-    pjsua_call_info inci;
-	pjsua_conf_port_id port_id;
+	pjsua_call_info inci;
 
 	struct socket_frame sip_socket_frame = { 0 };
-    //PJ_UNUSED_ARG(acc_id);
-    PJ_UNUSED_ARG(rdata);
-	char buf[256];
+	PJ_UNUSED_ARG(acc_id);
+	PJ_UNUSED_ARG(rdata);
 	int ret;
-    pjsua_call_get_info(call_id, &inci);
+	pjsua_call_get_info(call_id, &inci);
 	printf("RING!\n");
 	printf("Incoming call from %.*s\n",(int)inci.remote_info.slen,
                          inci.remote_info.ptr);
 
-    PJ_LOG(3,(__FILE__, "Incoming call from %.*s!!",
+	PJ_LOG(3,(__FILE__, "Incoming call from %.*s!!",
                          (int)inci.remote_info.slen,
                          inci.remote_info.ptr));
 	sip_socket_frame.type = SOCKET_FRAME_SIP_INFO;
@@ -298,19 +296,11 @@ static void on_incoming_call(pjsua_acc_id acc_id, pjsua_call_id call_id,
 	while(inci.media_status == PJSUA_CALL_MEDIA_NONE){
 		if (answercall == 1){
 			answercall = 0;
-			pjsua_call_answer(call_id, 200, NULL, NULL);	
-			return;	
+			pjsua_call_answer(call_id, 200, NULL, NULL);
+			return;
 		}
 		
 	}
-
-						 
-    /* Automatically answer incoming calls with 200/OK */
-//    pjsua_call_answer(call_id, 200, NULL, NULL);
-//	pjsua_conf_add_port(pool, &port.base, &port_id);
-//	pjsua_conf_connect(inci.conf_slot, port_id);
-//	pjsua_conf_connect(port_id, inci.conf_slot);
-
 }
 
 
@@ -331,9 +321,6 @@ int main(int argc, char *argv[]) {
 	pjsua_acc_id acc_id;
 	pjsua_transport_id transport;
 	pj_status_t status;
-	pjmedia_port blankmediaport;
-	pjsua_conf_port_id blank_port_id;
-	struct socket_frame socket_frame = { 0 };
 	struct socket_frame sip_socket_frame = { 0 };
 
 	char *sip_domain = NULL;
@@ -561,17 +548,12 @@ int main(int argc, char *argv[]) {
 	//if (status != PJ_SUCCESS) error_exit("Error making call", status);
 	//}
 	
-	//hack to start socket
-	//pjsua_conf_add_port(pool,&port.base,&blank_port_id);
-	//pjsua_conf_connect(blank_port_id,blank_port_id);
 
 
 
-	struct timespec ts = {100, 0};
 	struct timeval stmo;
 	fd_set srset,seset;
-	int sret,scount;
-	int sip_max_fd;
+	int sret;
 
 	stmo.tv_sec = 0;
 	stmo.tv_usec = 2000;
@@ -677,7 +659,6 @@ int main(int argc, char *argv[]) {
 		
 	
 		}
-		//nanosleep(&ts,NULL);
 	}
 
 }	
