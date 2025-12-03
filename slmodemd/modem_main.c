@@ -124,7 +124,6 @@ static char outbuf[4096];
 static pid_t pid = 0;
 static int modem_volume = 0;
 static int sip_modem_hookstate = 0;
-static int sip_ringing = 0;
 static void *rcSIPtoMODEM = NULL;
 static void *rcMODEMtoSIP = NULL;
 
@@ -640,17 +639,6 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 			//if(m->pty > sip_max_fd) sip_max_fd = m->pty;
 		}
 
-		//DBG("keep_running select audio");
-		//DBG("check sip ring loop");
-		if(sip_ringing == 1){
-			modem_send_to_tty(m,"RING",4);
-			modem_send_to_tty(m,CRLF_CHARS(m),2);
-			DBG("TTY RING!!");
-			modem_send_to_tty(m,"RING",4);
-			modem_send_to_tty(m,CRLF_CHARS(m),2);
-			sip_ringing = 0;
-		}
-
 		ret = select(max_fd + 1,&rset,NULL,&eset,&tmo);
 
 		if (ret < 0) {
@@ -675,20 +663,15 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 			printf("sip msg: %s\n",packet);
 			if (strncmp(packet,"SR",3) == 0){
 				// Line is ringing.
-				sip_ringing = 1;
-			} else if (strncmp(packet, "SH", 3) == 0) {
-				// Hang up modem.
-				printf("TODO: SIP call disconnected\n");
-				modem_hangup(m);
-			}
-			//DBG("check sip ring loop");
-			if(sip_ringing == 1){
 				modem_send_to_tty(m,"RING",4);
 				modem_send_to_tty(m,CRLF_CHARS(m),2);
 				DBG("TTY RING!!");
 				modem_send_to_tty(m,"RING",4);
 				modem_send_to_tty(m,CRLF_CHARS(m),2);
-				sip_ringing = 0;
+			} else if (strncmp(packet, "SH", 3) == 0) {
+				// Hang up modem.
+				printf("TODO: SIP call disconnected\n");
+				modem_hangup(m);
 			}
 		}
 		if (FD_ISSET(dev->sipfd, &eset)){
