@@ -93,6 +93,7 @@ extern void prop_dp_exit(void);
 extern int datafile_load_info(char *name,struct dsp_info *info);
 extern int datafile_save_info(char *name,struct dsp_info *info);
 extern int modem_ring_detector_start(struct modem *m);
+extern int modem_send_to_tty(struct modem *m, const char *buf, int n);
 
 /* Rate conversion */
 extern void *RcFixed_Create(int mode); // 2 -> 8->9.6; 3 -> 9.6->8
@@ -109,6 +110,7 @@ extern mode_t modem_perm;
 extern unsigned int use_short_buffer;
 extern const char *modem_exec;
 
+void return_data_to_child (struct modem *m,char buf[256]);
 
 struct device_struct {
 	int num;
@@ -134,8 +136,6 @@ static int socket_start (struct modem *m)
 {
 	struct device_struct *dev = m->dev_data;
 	struct socket_frame socket_frame = { 0 };
-	struct socket_frame sip_socket_frame = { 0 };
-	int buf;
 	int ret;
 	DBG("socket_start...\n");
 
@@ -194,7 +194,6 @@ static int socket_start (struct modem *m)
 		dev->sipfd = sip_sockets[1];
 		dev->delay = 0;
 		socket_frame.type = SOCKET_FRAME_AUDIO;
-		sip_socket_frame.type = SOCKET_FRAME_SIP_INFO;
 
 		DBG("write audio frame..");
 		ret = write(dev->fd, &socket_frame, sizeof(socket_frame));
@@ -259,16 +258,12 @@ void return_data_to_child (struct modem *m,char buf[256])
 //send cid in socket
 static int socket_dial (struct modem *m)
 {
-	struct device_struct *dev = m->dev_data;
-	struct socket_frame sip_socket_frame = { 0 };
-	int ret;
 	char dialreturn[256];
-	char atstring[64];
 	DBG("socket_dial:request...\n");
 	DBG("AT String %s",m->at_cmd);
 	
 	//No AT cmd
-	if (m->at_cmd == '\0'){
+	if (m->at_cmd[0] == '\0'){
 		DBG("No AT command");
 		return 0;
 	}
@@ -294,7 +289,6 @@ static int socket_dial (struct modem *m)
 
 static int socket_stop (struct modem *m)
 {
-	struct device_struct *dev = m->dev_data;
 	DBG("socket_stop...\n");
 	DBG("kill -%d %d\n", SIGTERM, pid);
 	if (pid) {
@@ -314,12 +308,11 @@ static int socket_stop (struct modem *m)
 
 static int socket_hangup (struct modem *m)
 {
-	struct device_struct *dev = m->dev_data;
 	char ret[256];
 	DBG("hangup...\n");
 	sip_modem_hookstate = 0;
 	DBG("socket:sipinfo:hookstate: %x \n",sip_modem_hookstate);
-	snprintf(ret,3,"MH%i",sip_modem_hookstate);
+	snprintf(ret,sizeof(ret),"MH%i",sip_modem_hookstate);
 	DBG("return data to child process...\n");
 	//return_data_to_child(m,ret);
 	return 0;
@@ -348,14 +341,16 @@ static int socket_ioctl(struct modem *m, unsigned int cmd, unsigned long arg)
 	case MDMCTL_SPEAKERVOL:
 		modem_volume = arg;
 		if (pid) {
+      /*
 			struct socket_frame socket_frame = { 0 };
 
 			socket_frame.type = SOCKET_FRAME_VOLUME;
 			socket_frame.data.volume.value = arg;
-			//ret = write(dev->fd, &socket_frame, sizeof(socket_frame));
-			//if (ret != sizeof(socket_frame)) {
-			//	perror("speaker vol write fail");
-			//}
+			ret = write(dev->fd, &socket_frame, sizeof(socket_frame));
+			if (ret != sizeof(socket_frame)) {
+				perror("speaker vol write fail");
+			}
+      */
 			DBG("adjust volume frame needed");
 		}
 		ret = 0;
@@ -409,12 +404,10 @@ static int mdm_device_read(struct device_struct *dev, char *buf, int size)
 	}
 	while(1) {
 		int ret = read(dev->fd, &socket_frame, sizeof(socket_frame));
-		int len;
 
 		if (ret < 0) {
 			return ret;
 		}
-
 
 		switch (socket_frame.type) {
 			case SOCKET_FRAME_AUDIO:
@@ -585,8 +578,6 @@ int create_pty(struct modem *m)
  *
  */
 
-static int (*device_release)(struct device_struct *dev);
-
 static volatile sig_atomic_t keep_running = 1;
 
 void mark_termination(int signum)
@@ -604,16 +595,12 @@ void child_conn_closed(int signum)
 static int modem_run(struct modem *m, struct device_struct *dev)
 {
 	struct timeval tmo;
-	struct timeval stmo;
 	struct socket_frame sip_socket_frame = { 0 };
 	fd_set rset,eset;
-	fd_set srset,seset;
 	struct termios termios;
 	unsigned pty_closed = 0, close_count = 0;
 	int max_fd;
-	int sip_max_fd;
 	int ret, count;
-	int sret,scount;
 
 	void *in;
 
@@ -631,24 +618,20 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 
 		tmo.tv_sec = 1;
 		tmo.tv_usec= 0;
-		stmo.tv_sec = 0;
-		stmo.tv_usec = 2000;
 
 		//DBG("keep_running FD_ZERO");
-		FD_ZERO(&rset);
-		FD_ZERO(&srset);
-		FD_ZERO(&eset);
-		FD_ZERO(&seset);
+		FD_ZERO(&rset); // read set
+		FD_ZERO(&eset); // exception set
 		//DBG("keep_running FDSET");
 		if(m->started)
 			FD_SET(dev->fd,&rset);
-
-		FD_SET(dev->sipfd,&srset);
+		FD_SET(dev->sipfd,&rset);
 
 		FD_SET(dev->fd,&eset);
-		FD_SET(dev->sipfd,&seset);
-		max_fd = dev->fd;
-		sip_max_fd = dev->sipfd;
+		FD_SET(dev->sipfd,&eset);
+
+		max_fd = (dev->fd > dev->sipfd) ? dev->fd : dev->sipfd;
+
 		//DBG("keep_running pty_closed count");
 		if(pty_closed && close_count > 0) {
 			//DBG("keep_running pty_closed count >0");
@@ -660,7 +643,6 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 		else if(m->xmit.size - m->xmit.count > 0) {
 			//DBG("keep_running pty FDSET rset");
 			FD_SET(m->pty,&rset);
-			//FD_SET(m->pty,&srset);
 			if(m->pty > max_fd) {
 				max_fd = m->pty;
 			}
@@ -680,16 +662,24 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 
 		ret = select(max_fd + 1,&rset,NULL,&eset,&tmo);
 
-		//DBG("keep_runnng select sipinfo\n");
-		sret = select(sip_max_fd + 1,&srset,NULL,&seset,&stmo);
-		//DBG("keep_running ret val %d",ret);				
-		//DBG("keep_running sret val %d",sret);
-		//DBG("check sip ringing %d",sip_ringing);
-		if (sret == 1){
-			scount = read(dev->sipfd, &sip_socket_frame, sizeof(sip_socket_frame));
+		if (ret < 0) {
+			//DBG("keep_running ret < 0");
+			if (errno == EINTR)
+				continue;
+			ERR("select: %s\n",strerror(errno));
+			return ret;
+		}
+
+		if ( ret == 0 ) {
+			//DBG("keep_running ret == 0\n");
+			continue;
+		}
+
+		if (FD_ISSET(dev->sipfd, &rset)){
+			count = read(dev->sipfd, &sip_socket_frame, sizeof(sip_socket_frame));
 			char *packet;
 			packet = sip_socket_frame.data.sip.info;
-			DBG("sip msg scount %d",scount);
+			DBG("sip msg count %d",count);
 			//DBG("sip msg: %s\n",packet);
 			if (strncmp(packet,"S",1) == 0){
 				DBG("SIP CMD RECEIVED");
@@ -704,7 +694,6 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 				}
 			}
 		}
-		//DBG("keep_running scount val %d",scount);				
 		//DBG("check sip ring loop");
 		if(sip_ringing == 1){
 			modem_send_to_tty(m,"RING",4);
@@ -716,46 +705,19 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 		}
 
 
-		if (ret < 0) {
-			//DBG("keep_running ret < 0");
-			if (errno == EINTR)
-				continue;
-			ERR("select: %s\n",strerror(errno));
-			return ret;
-		}
-		if (sret < 0) {
-			//DBG("keep_running sret < 0");
-			if (errno == EINTR)
-				continue;
-			ERR("sselect: %s\n",strerror(errno));
-			return ret;
-		}
-
-		if ( ret == 0 ) {
-			//DBG("keep_running ret == 0\n");
-			continue;
-		}
-		//if ( sret == 0 )
-		//	continue;
 
 		//DBG("keep_running FD_ISSET eset before loop");
 		//FD error set
 		if(FD_ISSET(dev->fd, &eset)) {
 			unsigned stat;
-			unsigned sstat;
+			//unsigned sstat;
 			DBG("dev exception...\n");
 			ret = ioctl(dev->fd,100000+MDMCTL_GETSTAT,&stat);
 			//DBG("keep_running ioctl ret %d",ret);
-			sret = ioctl(dev->sipfd,100000+MDMCTL_GETSTAT,&sstat);
-			//DBG("keep_running ioctl sret %d",sret);
 			if(ret < 0) {
 				ERR("dev ioctl: %s\n",strerror(errno));
 				return -1;
 			}
-			if(sret < 0) {
-				ERR("dev ioctl: %s\n",strerror(errno));
-				//return -1;
-			}			
 			if(stat&MDMSTAT_ERROR) modem_error(m);
 			if(stat&MDMSTAT_RING)  modem_ring(m);
 			continue;
