@@ -1061,9 +1061,9 @@ static void do_modem_change_dp (struct modem *m)
 		m->process = modem_dp_process;
 	}
 
-        if ( old ) {
-                old->op->delete(old);
-        }
+	if ( old ) {
+		old->op->delete(old);
+	}
 
 }
 
@@ -1627,22 +1627,22 @@ int modem_dial(struct modem *m)
 int modem_hook(struct modem *m, unsigned hook_state)
 {
 	MODEM_DBG("modem hook...\n");
-        if ( m->hook == hook_state )
-                return 0;
-        if (!IS_STATE_IDLE(m->state))
+	if ( m->hook == hook_state )
+		return 0;
+	if (!IS_STATE_IDLE(m->state))
 		modem_hup(m,1);
-        return modem_set_hook(m,hook_state);
+	return modem_set_hook(m,hook_state);
 }
 
 int modem_online(struct modem *m)
 {
 	MODEM_DBG("modem online...\n");
-        if (m->state != STATE_COMMAND_ONLINE)
-                return -1;
+	if (m->state != STATE_COMMAND_ONLINE)
+		return -1;
 	m->command = 0;
-        modem_set_state(m, STATE_MODEM_ONLINE);
+	modem_set_state(m, STATE_MODEM_ONLINE);
 	modem_report_result(m,RESULT_CONNECT); // fixme
-        return 0;
+	return 0;
 }
 
 void modem_update_speaker(struct modem *m)

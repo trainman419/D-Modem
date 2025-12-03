@@ -93,6 +93,7 @@ extern void prop_dp_exit(void);
 extern int datafile_load_info(char *name,struct dsp_info *info);
 extern int datafile_save_info(char *name,struct dsp_info *info);
 extern int modem_send_to_tty(struct modem *m, const char *buf, int n);
+extern int modem_hook(struct modem *m,unsigned hook_state);
 
 /* Rate conversion */
 extern void *RcFixed_Create(int mode); // 2 -> 8->9.6; 3 -> 9.6->8
@@ -602,17 +603,15 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 	void *in;
 
 	while(keep_running) {
-		//DBG("keep_running modem_event");
 		if(m->event)
 			modem_event(m);
 
 		tmo.tv_sec = 1;
 		tmo.tv_usec= 0;
 
-		//DBG("keep_running FD_ZERO");
 		FD_ZERO(&rset); // read set
 		FD_ZERO(&eset); // exception set
-		//DBG("keep_running FDSET");
+
 		if(m->started)
 			FD_SET(dev->fd,&rset);
 		FD_SET(dev->sipfd,&rset);
@@ -622,35 +621,31 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 
 		max_fd = (dev->fd > dev->sipfd) ? dev->fd : dev->sipfd;
 
-		//DBG("keep_running pty_closed count");
 		if(pty_closed && close_count > 0) {
-			//DBG("keep_running pty_closed count >0");
 			if(!m->started ||
 				++close_count > CLOSE_COUNT_MAX ) {
 				close_count = 0;
 			}
 		}
+
 		else if(m->xmit.size - m->xmit.count > 0) {
-			//DBG("keep_running pty FDSET rset");
 			FD_SET(m->pty,&rset);
 			if(m->pty > max_fd) {
 				max_fd = m->pty;
 			}
-			//if(m->pty > sip_max_fd) sip_max_fd = m->pty;
 		}
 
 		ret = select(max_fd + 1,&rset,NULL,&eset,&tmo);
 
 		if (ret < 0) {
-			//DBG("keep_running ret < 0");
 			if (errno == EINTR)
 				continue;
 			ERR("select: %s\n",strerror(errno));
 			return ret;
 		}
 
+		// select() returned timeout. Wait again.
 		if ( ret == 0 ) {
-			//DBG("keep_running ret == 0\n");
 			continue;
 		}
 
@@ -668,10 +663,14 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 				DBG("TTY RING!!");
 				modem_send_to_tty(m,"RING",4);
 				modem_send_to_tty(m,CRLF_CHARS(m),2);
+				// TODO: test if we need this here or not.
+				// modem_ring(m);
 			} else if (strncmp(packet, "SH", 3) == 0) {
 				// Hang up modem.
-				printf("TODO: SIP call disconnected\n");
-				modem_hangup(m);
+				printf("SIP call disconnected\n");
+				//modem_hangup(m);
+				modem_hook(m, MODEM_HOOK_ON);
+				sip_modem_hookstate = 0;
 			}
 		}
 		if (FD_ISSET(dev->sipfd, &eset)){
