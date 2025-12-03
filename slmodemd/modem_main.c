@@ -92,7 +92,6 @@ extern int  prop_dp_init(void);
 extern void prop_dp_exit(void);
 extern int datafile_load_info(char *name,struct dsp_info *info);
 extern int datafile_save_info(char *name,struct dsp_info *info);
-extern int modem_ring_detector_start(struct modem *m);
 extern int modem_send_to_tty(struct modem *m, const char *buf, int n);
 
 /* Rate conversion */
@@ -103,7 +102,6 @@ extern void RcFixed_Reset(void *rc);
 
 /* global config data */
 extern const char *modem_dev_name;
-extern unsigned int ring_detector;
 extern unsigned int need_realtime;
 extern const char *modem_group;
 extern mode_t modem_perm;
@@ -609,13 +607,6 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 		if(m->event)
 			modem_event(m);
 
-#ifdef MODEM_CONFIG_RING_DETECTOR
-		if(ring_detector && !m->started){
-			//DBG("keep_running ring_detector_event");
-			modem_ring_detector_start(m);
-		}
-#endif
-
 		tmo.tv_sec = 1;
 		tmo.tv_usec= 0;
 
@@ -676,44 +667,39 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 		}
 
 		if (FD_ISSET(dev->sipfd, &rset)){
+			printf("reading dev->sipfd\n");
 			count = read(dev->sipfd, &sip_socket_frame, sizeof(sip_socket_frame));
 			char *packet;
 			packet = sip_socket_frame.data.sip.info;
 			DBG("sip msg count %d",count);
-			//DBG("sip msg: %s\n",packet);
-			if (strncmp(packet,"S",1) == 0){
-				DBG("SIP CMD RECEIVED");
-				packet++;
-				if (strncmp(packet,"R",1) == 0) {
-          // Line is ringing.
-					sip_ringing = 1;
-				} else if (strncmp(packet, "H", 0) == 0) {
-          // Hang up modem.
-          DBG("SIP call disconnected");
-          modem_hangup(m);
-				}
+			printf("sip msg: %s\n",packet);
+			if (strncmp(packet,"SR",3) == 0){
+				// Line is ringing.
+				sip_ringing = 1;
+			} else if (strncmp(packet, "SH", 3) == 0) {
+				// Hang up modem.
+				printf("TODO: SIP call disconnected\n");
+				modem_hangup(m);
+			}
+			//DBG("check sip ring loop");
+			if(sip_ringing == 1){
+				modem_send_to_tty(m,"RING",4);
+				modem_send_to_tty(m,CRLF_CHARS(m),2);
+				DBG("TTY RING!!");
+				modem_send_to_tty(m,"RING",4);
+				modem_send_to_tty(m,CRLF_CHARS(m),2);
+				sip_ringing = 0;
 			}
 		}
-		//DBG("check sip ring loop");
-		if(sip_ringing == 1){
-			modem_send_to_tty(m,"RING",4);
-			modem_send_to_tty(m,CRLF_CHARS(m),2);
-			DBG("TTY RING!!");
-			modem_send_to_tty(m,"RING",4);
-			modem_send_to_tty(m,CRLF_CHARS(m),2);
-			sip_ringing = 0;
+		if (FD_ISSET(dev->sipfd, &eset)){
+			printf("TODO: error on dev->sipfd\n");
 		}
 
-
-
-		//DBG("keep_running FD_ISSET eset before loop");
 		//FD error set
 		if(FD_ISSET(dev->fd, &eset)) {
 			unsigned stat;
-			//unsigned sstat;
-			DBG("dev exception...\n");
+			printf("error on dev->fd\n");
 			ret = ioctl(dev->fd,100000+MDMCTL_GETSTAT,&stat);
-			//DBG("keep_running ioctl ret %d",ret);
 			if(ret < 0) {
 				ERR("dev ioctl: %s\n",strerror(errno));
 				return -1;
@@ -722,8 +708,7 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 			if(stat&MDMSTAT_RING)  modem_ring(m);
 			continue;
 		}
-		//sipfd
-		//DBG("keep_running FD_ISSET fd rset before loop");
+
 		if(FD_ISSET(dev->fd, &rset)) {
 			//DBG("keep_running FD_ISSET fd rset set");
 			count = mdm_device_read(dev,inbuf,sizeof(inbuf)/2);

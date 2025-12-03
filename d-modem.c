@@ -169,7 +169,11 @@ static void on_call_state(pjsua_call_id call_id, pjsip_event *e) {
 		sip_socket_frame.type = SOCKET_FRAME_SIP_INFO;
 		snprintf(sip_socket_frame.data.sip.info,256,"SH");
 		ret = write(sipsocket,&sip_socket_frame, sizeof(sip_socket_frame));
-		printf("sip socket write %i\n",ret);
+		printf("on_call_state: sip socket write %i\n",ret);
+		if (ret != sizeof(sip_socket_frame)) {
+			perror("on_call_state: write fail\n");
+			exit(EXIT_FAILURE);
+		}
 	}
 }
 
