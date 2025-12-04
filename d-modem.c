@@ -249,8 +249,8 @@ static void on_call_media_state(pjsua_call_id call_id) {
       */
 			current_conf_slot = ci.conf_slot;
 
-			//pjsua_conf_adjust_rx_level(port_id, 1.0);
-			//pjsua_conf_adjust_rx_level(ci.conf_slot, 1.0);
+			pjsua_conf_adjust_rx_level(port.port_id, 1.0);
+			pjsua_conf_adjust_rx_level(ci.conf_slot, 1.0);
 
 #ifdef WITH_AUDIO
 			if (pjmedia_splitcomb_create(pool, SIP_RATE, 2, SIP_FRAMESIZE, 16, 0, &sc) != PJ_SUCCESS)
