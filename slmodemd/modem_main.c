@@ -397,7 +397,7 @@ static int mdm_device_read(struct device_struct *dev, char *buf, int size)
 {
 	struct socket_frame socket_frame = { 0 };
 	if (size < MODEM_FRAMESIZE) {
-		printf("mdm_device_read return");
+		printf("mdm_device_read return\n");
 		return 0;
 	}
 	while(1) {
@@ -463,7 +463,7 @@ static int mdm_device_write(struct device_struct *dev, const char *buf, int size
 		ERR("frame buffer size doesn't match\n");
 		exit(EXIT_FAILURE);
 	}
-	//DBG("audio frame write");
+	printf("mdm_device_write: audio frame write\n");
 	int ret = write(dev->fd, &socket_frame, sizeof(socket_frame));
 	if (ret > 0 && ret != sizeof(socket_frame)) { ERR("error writing!"); exit(EXIT_FAILURE); }
 	if (ret > 0) ret = MODEM_FRAMESIZE;
@@ -670,7 +670,9 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 				// Hang up modem.
 				printf("SIP call disconnected\n");
 				modem_hangup(m);
-				modem_hook(m, MODEM_HOOK_ON);
+				m->sample_timer_func(m);
+				m->sample_timer = 0;
+				m->sample_timer_func = NULL;
 				sip_modem_hookstate = 0;
 			}
 		}

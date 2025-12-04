@@ -213,7 +213,7 @@ static void on_call_media_state(pjsua_call_id call_id) {
 
 	if (ci.media_status == PJSUA_CALL_MEDIA_ACTIVE) {
 		if (ci.conf_slot != current_conf_slot) {
-			//struct socket_frame socket_frame = { 0 };
+			struct socket_frame socket_frame = { 0 };
 			if (current_conf_slot < 0) {
 				printf("media_status setting up conference bridge\n");
 			} else {
@@ -273,8 +273,8 @@ static void on_call_media_state(pjsua_call_id call_id) {
 
 			//Kick off audio
 			printf("Kicking off audio!\n");
-			//socket_frame.type = SOCKET_FRAME_AUDIO;
-			//write(port.sock, &socket_frame, sizeof(socket_frame));
+			socket_frame.type = SOCKET_FRAME_AUDIO;
+			write(port.sock, &socket_frame, sizeof(socket_frame));
 
 		} else {
 			printf("media_status ACTIVE called when media already active\n");
