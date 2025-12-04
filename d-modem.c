@@ -71,7 +71,7 @@ static pj_status_t dmodem_put_frame(pjmedia_port *this_port, pjmedia_frame *fram
 	memset(&socket_frame, 0, sizeof(socket_frame));
 
 	if (frame->type == PJMEDIA_FRAME_TYPE_AUDIO) {
-		printf("dmodem: writing audio frame\n"); //super debug
+		// printf("dmodem: writing audio frame\n"); //super debug
 		if (frame->size != sizeof(socket_frame.data.audio.buf)) {
 			return PJSIP_EINVALIDMSG;
 		}
@@ -81,7 +81,7 @@ static pj_status_t dmodem_put_frame(pjmedia_port *this_port, pjmedia_frame *fram
 	} else if (frame->type == PJMEDIA_FRAME_TYPE_NONE) {
 		// PJMEDIA_FRAME_TYPE_NONE is used when incoming data is silence.
 		// Fill buffer with zeroes and send it over to the modem.
-		printf("dmodem: got silence; writing audio frame\n");
+		// printf("dmodem: got silence; writing audio frame\n");
 		socket_frame.type = SOCKET_FRAME_AUDIO;
 		memset(socket_frame.data.audio.buf, 0, sizeof(socket_frame.data.audio.buf));
 	} else {
@@ -115,13 +115,14 @@ static pj_status_t dmodem_get_frame(pjmedia_port *this_port, pjmedia_frame *fram
 
 	while(running) {
 		if ((len=read(sm->sock, &socket_frame, sizeof(socket_frame))) != sizeof(socket_frame)) {
-			error_exit("error reading frame",0);
-			//printf("dmodem_get_frame: error reading frame\n");
+			// error_exit("error reading frame",0);
+			printf("dmodem_get_frame: error reading frame\n");
+      return PJSIP_EINVALIDMSG;
 		}
 
 		switch(socket_frame.type) {
 			case SOCKET_FRAME_AUDIO:
-				printf("dmodem_get_frame: audio frame recieved\n");
+				// printf("dmodem_get_frame: audio frame recieved\n");
 				len = frame->size;
 				memcpy(frame->buf, socket_frame.data.audio.buf, len);
 				frame->timestamp.u64 = sm->timestamp.u64;
@@ -153,7 +154,6 @@ static pj_status_t dmodem_get_frame(pjmedia_port *this_port, pjmedia_frame *fram
 		}
 	}
 
-	exit(1);
 	return PJSIP_EINVALIDMSG;
 }
 
@@ -239,12 +239,14 @@ static void on_call_media_state(pjsua_call_id call_id) {
 				error_exit("can't connect modem port (in)",0);
 
 			// disconnect previous audio
+      /*
 			if (current_conf_slot >= 0) {
 				if (pjsua_conf_disconnect(current_conf_slot, port.port_id) != PJ_SUCCESS)
 					error_exit("can't connect modem port (out)",0);
 				if (pjsua_conf_disconnect(port.port_id, current_conf_slot) != PJ_SUCCESS)
 					error_exit("can't connect modem port (in)",0);
 			}
+      */
 			current_conf_slot = ci.conf_slot;
 
 			//pjsua_conf_adjust_rx_level(port_id, 1.0);
@@ -485,20 +487,21 @@ int main(int argc, char *argv[]) {
 		perror("Failed to set audio socket as non-blocking");
 	}
 
-	pjmedia_port_info_init(&port.base.info, &name, SIGNATURE, SIP_RATE, 1, 16, SIP_FRAMESIZE);
-	port.base.put_frame = dmodem_put_frame;
-	port.base.get_frame = dmodem_get_frame;
-	port.base.on_destroy = dmodem_on_destroy;
-	if (pjsua_conf_add_port(pool, &port.base, &port.port_id) != PJ_SUCCESS) {
-		error_exit("can't add modem port",0);
-	}
-
 
 	char buf[1024] = { 0 };
 	/* Initialization is done, now start pjsua */
 	status = pjsua_start();
 	if (status != PJ_SUCCESS) {
 		error_exit("Error starting pjsua", status);
+	}
+
+  // Add media port for modem.
+	pjmedia_port_info_init(&port.base.info, &name, SIGNATURE, SIP_RATE, 1, 16, SIP_FRAMESIZE);
+	port.base.put_frame = dmodem_put_frame;
+	port.base.get_frame = dmodem_get_frame;
+	port.base.on_destroy = dmodem_on_destroy;
+	if (pjsua_conf_add_port(pool, &port.base, &port.port_id) != PJ_SUCCESS) {
+		error_exit("can't add modem port",0);
 	}
 
 	if (!direct_call) {
@@ -554,6 +557,9 @@ int main(int argc, char *argv[]) {
 
 	running = true;
 	while(running) {
+    // Debug: check media port status.
+    // printf("pjsua_conf_get_active_ports: %d\n", pjsua_conf_get_active_ports());
+
 		stmo.tv_sec = 1;
 		stmo.tv_usec = 0;
 		FD_ZERO(&srset);

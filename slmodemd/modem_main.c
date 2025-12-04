@@ -409,7 +409,7 @@ static int mdm_device_read(struct device_struct *dev, char *buf, int size)
 
 		switch (socket_frame.type) {
 			case SOCKET_FRAME_AUDIO:
-				printf("mdm_device_read: got audio frame\n");
+				//printf("mdm_device_read: got audio frame\n");
 				//DBG("audio frame get")
 				if (ret != sizeof(socket_frame)) {
 					ERR("audio frame size doesn't match %d - %d\n", ret, sizeof(socket_frame));
@@ -463,7 +463,7 @@ static int mdm_device_write(struct device_struct *dev, const char *buf, int size
 		ERR("frame buffer size doesn't match\n");
 		exit(EXIT_FAILURE);
 	}
-	printf("mdm_device_write: audio frame write\n");
+	// printf("mdm_device_write: audio frame write\n");
 	int ret = write(dev->fd, &socket_frame, sizeof(socket_frame));
 	if (ret > 0 && ret != sizeof(socket_frame)) { ERR("error writing!"); exit(EXIT_FAILURE); }
 	if (ret > 0) ret = MODEM_FRAMESIZE;
