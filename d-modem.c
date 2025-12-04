@@ -64,9 +64,11 @@ static void error_exit(const char *title, pj_status_t status) {
 
 static pj_status_t dmodem_put_frame(pjmedia_port *this_port, pjmedia_frame *frame) {
 	struct dmodem *sm = (struct dmodem *)this_port;
-	struct socket_frame socket_frame = { 0 };
+	struct socket_frame socket_frame;
 	struct pollfd pollfds = { .fd = sm->sock, .events = POLLOUT, .revents = 0 };
 	int len, ret;
+
+	memset(&socket_frame, 0, sizeof(socket_frame));
 
 	if (frame->type == PJMEDIA_FRAME_TYPE_AUDIO) {
 		printf("dmodem: writing audio frame\n"); //super debug
@@ -106,8 +108,10 @@ static pj_status_t dmodem_put_frame(pjmedia_port *this_port, pjmedia_frame *fram
 
 static pj_status_t dmodem_get_frame(pjmedia_port *this_port, pjmedia_frame *frame) {
 	struct dmodem *sm = (struct dmodem *)this_port;
-	struct socket_frame socket_frame = { 0 };
+	struct socket_frame socket_frame;
 	int len;
+
+	memset(&socket_frame, 0, sizeof(socket_frame));
 
 	frame->size = PJMEDIA_PIA_MAX_FSZ(&this_port->info);
 	if (frame->size != SIP_FRAMESIZE * 2) {
@@ -171,9 +175,10 @@ pjsua_conf_port_id current_conf_slot = -1;
 static void on_call_state(pjsua_call_id call_id, pjsip_event *e) {
 	printf("on_call_state: callback\n");
 	pjsua_call_info ci;
-	struct socket_frame sip_socket_frame = { 0 };
+	struct socket_frame sip_socket_frame;
 	int ret = 0;
 
+	memset(&sip_socket_frame, 0, sizeof(sip_socket_frame));
 	PJ_UNUSED_ARG(e);
 
 	pjsua_call_get_info(call_id, &ci);
@@ -227,7 +232,8 @@ static void on_call_media_state(pjsua_call_id call_id) {
 
 	if (ci.media_status == PJSUA_CALL_MEDIA_ACTIVE) {
 		if (ci.conf_slot != current_conf_slot) {
-			struct socket_frame socket_frame = { 0 };
+			struct socket_frame socket_frame;
+			memset(&socket_frame, 0, sizeof(socket_frame));
 			if (current_conf_slot < 0) {
 				printf("media_status setting up conference bridge\n");
 			} else {
@@ -309,7 +315,9 @@ static void on_incoming_call(pjsua_acc_id acc_id, pjsua_call_id call_id,
 	printf("on_incoming_call: callback\n");
 	pjsua_call_info inci;
 
-	struct socket_frame sip_socket_frame = { 0 };
+	struct socket_frame sip_socket_frame;
+	memset(&sip_socket_frame, 0, sizeof(sip_socket_frame));
+
 	PJ_UNUSED_ARG(acc_id);
 	PJ_UNUSED_ARG(rdata);
 	int ret;
@@ -357,7 +365,8 @@ int main(int argc, char *argv[]) {
 	pjsua_acc_id acc_id;
 	pjsua_transport_id transport;
 	pj_status_t status;
-	struct socket_frame sip_socket_frame = { 0 };
+	struct socket_frame sip_socket_frame;
+	memset(&sip_socket_frame, 0, sizeof(sip_socket_frame));
 
 	char *sip_domain = NULL;
 	char *sip_pass = NULL;
@@ -538,7 +547,7 @@ int main(int argc, char *argv[]) {
 
 	printf("Dialer PID: %d\n", getpid());
 
-	char sipcid[32];
+	char sipcid[32] = "";
 
 	struct timeval stmo;
 	fd_set srset;

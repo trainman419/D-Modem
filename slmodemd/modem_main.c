@@ -601,6 +601,8 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 	int max_fd;
 	int ret, count;
 
+	memset(&termios, 0, sizeof(termios));
+
 	void *in;
 
 	while(keep_running) {
