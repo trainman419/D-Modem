@@ -159,8 +159,8 @@ static int socket_start (struct modem *m)
 		exit(-1);
 	}
 	if (pid == 0) {
-    // child after fork()
- 
+		// child after fork()
+
 		//call audio socket
 		char str[16];
 		snprintf(str,sizeof(str),"%d",sockets[0]);
@@ -179,7 +179,7 @@ static int socket_start (struct modem *m)
 			exit(-1);
 		}
 	} else {
-    // parent after fork()
+		// parent after fork()
 
 		// close child's sockets.
 		close(sockets[0]);
@@ -339,7 +339,7 @@ static int socket_ioctl(struct modem *m, unsigned int cmd, unsigned long arg)
 	case MDMCTL_SPEAKERVOL:
 		modem_volume = arg;
 		if (pid) {
-      /*
+			/*
 			struct socket_frame socket_frame = { 0 };
 
 			socket_frame.type = SOCKET_FRAME_VOLUME;
@@ -348,7 +348,7 @@ static int socket_ioctl(struct modem *m, unsigned int cmd, unsigned long arg)
 			if (ret != sizeof(socket_frame)) {
 				perror("speaker vol write fail");
 			}
-      */
+			*/
 			DBG("adjust volume frame needed");
 		}
 		ret = 0;
@@ -387,10 +387,10 @@ static int socket_ioctl(struct modem *m, unsigned int cmd, unsigned long arg)
 }
 
 struct modem_driver socket_modem_driver = {
-        .name = "socket driver",
-        .start = socket_dial,
-        .stop = socket_hangup,
-        .ioctl = socket_ioctl,
+	.name = "socket driver",
+	.start = socket_dial,
+	.stop = socket_hangup,
+	.ioctl = socket_ioctl,
 };
 
 static int mdm_device_read(struct device_struct *dev, char *buf, int size)
@@ -438,7 +438,7 @@ static int mdm_device_read(struct device_struct *dev, char *buf, int size)
 			DBG("mdm read framesize")
 				return 0;
 		}
-    return 0;
+		return 0;
 	}
 }
 
@@ -615,8 +615,7 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 		FD_ZERO(&rset); // read set
 		FD_ZERO(&eset); // exception set
 
-		if(m->started)
-			FD_SET(dev->fd,&rset);
+		FD_SET(dev->fd,&rset);
 		FD_SET(dev->sipfd,&rset);
 
 		FD_SET(dev->fd,&eset);
@@ -672,9 +671,11 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 				// Hang up modem.
 				printf("SIP call disconnected\n");
 				modem_hangup(m);
-				m->sample_timer_func(m);
-				m->sample_timer = 0;
-				m->sample_timer_func = NULL;
+				if(m->sample_timer_func) {
+					m->sample_timer_func(m);
+					m->sample_timer = 0;
+					m->sample_timer_func = NULL;
+				}
 				sip_modem_hookstate = 0;
 			}
 		}
@@ -703,67 +704,69 @@ static int modem_run(struct modem *m, struct device_struct *dev)
 			if(count <= 0) {
 				if (errno == ECONNRESET) {
 					DBG("lost connection to child socket process\n");
+					// TODO: exit; if we lost the child process, we're done.
 				} else {
 					ERR("dev read: %s\n",strerror(errno));
 				}
 				// hack to force hangup
 				DBG("keep_running modem_hangup");
 				modem_hangup(m); // sets sample_timer_func to run_modem_stop()
-				m->sample_timer_func(m);
-				m->sample_timer = 0;
-				m->sample_timer_func = NULL;
+				if(m->sample_timer_func) {
+					m->sample_timer_func(m);
+					m->sample_timer = 0;
+					m->sample_timer_func = NULL;
+				}
 				continue;
 			}
-			in = inbuf;
-			//DBG("keep_running change_delay");
-			if(m->update_delay < 0) {
-				if ( -m->update_delay >= count) {
-					DBG("change delay -%d...\n", count);
-					dev->delay -= count;
-					m->update_delay += count;
-					continue;
+			// If modem is running, pass it data. Otherwise, throw it away.
+			if(m->started) {
+				in = inbuf;
+				//DBG("keep_running change_delay");
+				if(m->update_delay < 0) {
+					if ( -m->update_delay >= count) {
+						DBG("change delay -%d...\n", count);
+						dev->delay -= count;
+						m->update_delay += count;
+						continue;
+					}
+					DBG("change delay %d...\n", m->update_delay);
+					in -= m->update_delay;
+					count += m->update_delay;
+					dev->delay += m->update_delay;
+					m->update_delay = 0;
 				}
-				DBG("change delay %d...\n", m->update_delay);
-				in -= m->update_delay;
-				count += m->update_delay;
-				dev->delay += m->update_delay;
-				m->update_delay = 0;
-			}
-			//DBG("keep_running modem_process");
-			modem_process(m,inbuf,outbuf,count);
-			errno = 0;
-			//DBG("keep_running device_write");
-			count = mdm_device_write(dev,outbuf,count);
-			if(count < 0) {
-				if (errno == EPIPE) {
-				DBG("keep_running EPIPE");
-					continue;
-				} else {
-					ERR("modem run: dev write: %s\n",strerror(errno));
-					return -1;
-				}
-			}
-			else if (count == 0) {
-				DBG("modem run dev write = 0\n");
-			}
-			//DBG("keep_running update_delay");
-			if(m->update_delay > 0) {
-				DBG("change delay +%d...\n", m->update_delay);
-				memset(outbuf, 0, m->update_delay*2);
-				count = mdm_device_write(dev,outbuf,m->update_delay);
+				modem_process(m,inbuf,outbuf,count);
+				errno = 0;
+				count = mdm_device_write(dev,outbuf,count);
 				if(count < 0) {
-					ERR("1267 modem run dev write: %s\n",strerror(errno));
-					return -1;
+					if (errno == EPIPE) {
+						DBG("keep_running EPIPE");
+						continue;
+					} else {
+						ERR("modem run: dev write: %s\n",strerror(errno));
+						return -1;
+					}
 				}
-				if(count != m->update_delay) {
-					ERR("cannot update delay: %d instead of %d.\n",
-					    count, m->update_delay);
-					return -1;
+				else if (count == 0) {
+					DBG("modem run dev write = 0\n");
 				}
-				dev->delay += m->update_delay;
-				m->update_delay = 0;
+				if(m->update_delay > 0) {
+					DBG("change delay +%d...\n", m->update_delay);
+					memset(outbuf, 0, m->update_delay*2);
+					count = mdm_device_write(dev,outbuf,m->update_delay);
+					if(count < 0) {
+						ERR("1267 modem run dev write: %s\n",strerror(errno));
+						return -1;
+					}
+					if(count != m->update_delay) {
+						ERR("cannot update delay: %d instead of %d.\n",
+								count, m->update_delay);
+						return -1;
+					}
+					dev->delay += m->update_delay;
+					m->update_delay = 0;
+				}
 			}
-			//DBG("keep_running finish rset loop");
 		}
 
 		//DBG("keep_running FD_ISSET pty rset");

@@ -1070,14 +1070,16 @@ static void do_modem_change_dp (struct modem *m)
 
 static int modem_set_hook(struct modem *m, unsigned hook_state)
 {
-        int ret;
-        MODEM_DBG("modem set hook: %d --> %d...\n", m->hook, hook_state);
-        if ( m->hook == hook_state )
-                return 0;
-        ret = m->driver.ioctl(m, MDMCTL_HOOKSTATE,hook_state);
-        if (!ret)
-                m->hook = hook_state;
-        return ret;
+	int ret;
+	MODEM_DBG("modem set hook: %d --> %d...\n", m->hook, hook_state);
+	if ( m->hook == hook_state ) {
+		return 0;
+	}
+	ret = m->driver.ioctl(m, MDMCTL_HOOKSTATE,hook_state);
+	if (!ret) {
+		m->hook = hook_state;
+	}
+	return ret;
 }
 
 static void modem_setup_config(struct modem *m)
@@ -1103,31 +1105,33 @@ static void modem_setup_config(struct modem *m)
 static int do_modem_start(struct modem *m)
 {
 	int ret;
-        ret = m->driver.ioctl(m, MDMCTL_SPEED, m->srate);
-        ret = m->driver.ioctl(m, MDMCTL_SETFRAG, m->frag);
-        m->count = 0;
-        ret = m->driver.start(m);
+	ret = m->driver.ioctl(m, MDMCTL_SPEED, m->srate);
+	ret = m->driver.ioctl(m, MDMCTL_SETFRAG, m->frag);
+	m->count = 0;
+	ret = m->driver.start(m);
 	m->started = !ret;
 	return ret;
 }
 
 static int modem_start (struct modem *m)
 {
-        int ret;
+	int ret;
 
-        MODEM_DBG("modem_start..\n");
+	MODEM_DBG("modem_start..\n");
 	if(m->started && modem_stop(m))
 		return -1;
 
 	m->result_code = 0;
 	modem_setup_config(m);
-        modem_set_state(m, STATE_ESTAB);
+	modem_set_state(m, STATE_ESTAB);
 
-	if(SPEAKER_CONTROL(m) == 1)
+	if(SPEAKER_CONTROL(m) == 1) {
 		m->driver.ioctl(m,MDMCTL_SPEAKERVOL,SPEAKER_VOLUME(m));
-        ret = modem_set_hook(m, MODEM_HOOK_OFF);
-        if (ret)
-                goto error;
+	}
+	ret = modem_set_hook(m, MODEM_HOOK_OFF);
+	if (ret) {
+		goto error;
+	}
 
 	m->xmit.head = m->xmit.tail = m->xmit.count = 0;
 	m->command = 0;
@@ -1151,7 +1155,7 @@ static int modem_start (struct modem *m)
 	m->event = m->new_event = 0;
 	timer_del(&m->event_timer);
 
-        ret = do_modem_start(m);
+	ret = do_modem_start(m);
 	if (!ret)
 		return 0;
 
@@ -1165,8 +1169,8 @@ static int modem_start (struct modem *m)
 
 static int modem_stop (struct modem *m)
 {
-        int ret = 0;
-        MODEM_DBG("modem_stop..\n");
+	int ret = 0;
+	MODEM_DBG("modem_stop..\n");
 
 	m->process = NULL;
 
@@ -1177,9 +1181,10 @@ static int modem_stop (struct modem *m)
 			MODEM_ERR("modem stop = %d: cannot stop device.\n",ret);
 		}
 	}
-        modem_set_hook(m, MODEM_HOOK_ON);
-	if(SPEAKER_CONTROL(m) == 1)
+	modem_set_hook(m, MODEM_HOOK_ON);
+	if(SPEAKER_CONTROL(m) == 1) {
 		m->driver.ioctl(m,MDMCTL_SPEAKERVOL,0);
+	}
 	m->caller = 0;
 	m->command = 1;
 
@@ -1187,12 +1192,12 @@ static int modem_stop (struct modem *m)
 	modem_ec_exit(m);
 	modem_comp_exit(m);
 
-        if (m->dp) {
-                struct dp *dp;
-                dp = m->dp;
-                m->dp = 0;
-                if(dp) dp->op->delete(dp);
-        }
+	if (m->dp) {
+		struct dp *dp;
+		dp = m->dp;
+		m->dp = 0;
+		if(dp) dp->op->delete(dp);
+	}
 	if (m->dp_runtime) {
 		dp_runtime_delete(m->dp_runtime);
 		m->dp_runtime = NULL;
@@ -1225,7 +1230,7 @@ static int modem_stop (struct modem *m)
 		m->fax_obj = NULL;
 	}
 #endif
-        modem_set_state(m, STATE_MODEM_IDLE);
+	modem_set_state(m, STATE_MODEM_IDLE);
 	if (m->result_code) {
 		modem_report_result(m, m->result_code);
 		m->result_code = 0;
@@ -1780,16 +1785,16 @@ void modem_hangup(struct modem *m)
 
 void modem_update_termios(struct modem *m, struct termios *tios)
 {
-        MODEM_DBG("update termios...\n");
-        if( cfgetispeed(tios) == B0 ||
-	    cfgetospeed(tios) == B0 ) {
-                MODEM_DBG("modem_update_termios: hangup.\n");
-                if(m->state!=STATE_MODEM_IDLE)
-                        modem_hup(m,1);
+	MODEM_DBG("update termios...\n");
+	if( cfgetispeed(tios) == B0 ||
+			cfgetospeed(tios) == B0 ) {
+		MODEM_DBG("modem_update_termios: hangup.\n");
+		if(m->state!=STATE_MODEM_IDLE)
+			modem_hup(m,1);
 		// TBD: drop DTR?
-        }
-        else
-                m->modem_info |= TIOCM_DTR;
+	} else {
+		m->modem_info |= TIOCM_DTR;
+	}
 	m->termios = *tios;
 }
 

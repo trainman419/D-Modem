@@ -117,7 +117,7 @@ static pj_status_t dmodem_get_frame(pjmedia_port *this_port, pjmedia_frame *fram
 		if ((len=read(sm->sock, &socket_frame, sizeof(socket_frame))) != sizeof(socket_frame)) {
 			// error_exit("error reading frame",0);
 			printf("dmodem_get_frame: error reading frame\n");
-      return PJSIP_EINVALIDMSG;
+			return PJSIP_EINVALIDMSG;
 		}
 
 		switch(socket_frame.type) {
@@ -238,15 +238,7 @@ static void on_call_media_state(pjsua_call_id call_id) {
 			if (pjsua_conf_connect(port.port_id, ci.conf_slot) != PJ_SUCCESS)
 				error_exit("can't connect modem port (in)",0);
 
-			// disconnect previous audio
-      /*
-			if (current_conf_slot >= 0) {
-				if (pjsua_conf_disconnect(current_conf_slot, port.port_id) != PJ_SUCCESS)
-					error_exit("can't connect modem port (out)",0);
-				if (pjsua_conf_disconnect(port.port_id, current_conf_slot) != PJ_SUCCESS)
-					error_exit("can't connect modem port (in)",0);
-			}
-      */
+			// NOTE: no need to disconnect previous audio; pjsip will handle it for us.
 			current_conf_slot = ci.conf_slot;
 
 			pjsua_conf_adjust_rx_level(port.port_id, 1.0);
@@ -495,7 +487,7 @@ int main(int argc, char *argv[]) {
 		error_exit("Error starting pjsua", status);
 	}
 
-  // Add media port for modem.
+	// Add media port for modem.
 	pjmedia_port_info_init(&port.base.info, &name, SIGNATURE, SIP_RATE, 1, 16, SIP_FRAMESIZE);
 	port.base.put_frame = dmodem_put_frame;
 	port.base.get_frame = dmodem_get_frame;
@@ -557,8 +549,8 @@ int main(int argc, char *argv[]) {
 
 	running = true;
 	while(running) {
-    // Debug: check media port status.
-    // printf("pjsua_conf_get_active_ports: %d\n", pjsua_conf_get_active_ports());
+		// Debug: check media port status.
+		// printf("pjsua_conf_get_active_ports: %d\n", pjsua_conf_get_active_ports());
 
 		stmo.tv_sec = 1;
 		stmo.tv_usec = 0;
@@ -611,9 +603,9 @@ int main(int argc, char *argv[]) {
 							if (!hs) {
 								printf("hanging up calls due to hookstate \n");
 								pjsua_call_hangup_all();
-								}
-						sip_modem_hookstate = hs;
-						printf("dmodem_main: changed hookstate: %d\n",sip_modem_hookstate);
+							}
+							sip_modem_hookstate = hs;
+							printf("dmodem_main: changed hookstate: %d\n",sip_modem_hookstate);
 						}
 					}
 					if (strncmp(packet,"D",1) == 0){
