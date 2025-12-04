@@ -643,6 +643,8 @@ int main(int argc, char *argv[]) {
 							if (status != PJ_SUCCESS) {
 								error_exit("Error making call", status);
 							}
+							// Call started; mark modem as off-hook.
+							sip_modem_hookstate = 1;
 						}
 						printf("dmodem_main: cid loop complete\n");
 					}

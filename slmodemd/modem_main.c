@@ -312,7 +312,7 @@ static int socket_hangup (struct modem *m)
 	DBG("socket:sipinfo:hookstate: %x \n",sip_modem_hookstate);
 	snprintf(ret,sizeof(ret),"MH%i",sip_modem_hookstate);
 	DBG("return data to child process...\n");
-	//return_data_to_child(m,ret);
+	return_data_to_child(m,ret);
 	return 0;
 }
 
