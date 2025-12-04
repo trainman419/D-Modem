@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <signal.h>
 #include <errno.h>
+#include <poll.h>
 
 #include <sys/socket.h>
 
@@ -64,29 +65,42 @@ static void error_exit(const char *title, pj_status_t status) {
 static pj_status_t dmodem_put_frame(pjmedia_port *this_port, pjmedia_frame *frame) {
 	struct dmodem *sm = (struct dmodem *)this_port;
 	struct socket_frame socket_frame = { 0 };
-	int len;
+	struct pollfd pollfds = { .fd = sm->sock, .events = POLLOUT, .revents = 0 };
+	int len, ret;
 
 	if (frame->type == PJMEDIA_FRAME_TYPE_AUDIO) {
-		printf("dmodem:writing audio frame\n"); //super debug
+		printf("dmodem: writing audio frame\n"); //super debug
 		if (frame->size != sizeof(socket_frame.data.audio.buf)) {
 			return PJSIP_EINVALIDMSG;
 		}
-
 		memcpy(socket_frame.data.audio.buf, frame->buf, frame->size);
 		socket_frame.type = SOCKET_FRAME_AUDIO;
 
-		if ((len=write(sm->sock, &socket_frame, sizeof(socket_frame))) != sizeof(socket_frame)) {
-			printf("dmodem:error writing audio frame: %s\n", strerror(errno));
-			//error_exit("error writing frame",0);
-		}
-
 	} else if (frame->type == PJMEDIA_FRAME_TYPE_NONE) {
-		//DBG("dmodem_put_frame: got NONE frame with length %ld\n", frame->size);
-		return PJ_SUCCESS;
+		// PJMEDIA_FRAME_TYPE_NONE is used when incoming data is silence.
+		// Fill buffer with zeroes and send it over to the modem.
+		printf("dmodem: got silence; writing audio frame\n");
+		socket_frame.type = SOCKET_FRAME_AUDIO;
+		memset(socket_frame.data.audio.buf, 0, sizeof(socket_frame.data.audio.buf));
 	} else {
 		printf("dmodem_put_frame: got unexpected frame type: %d\n", frame->type);
+		return PJSIP_EINVALIDMSG;
 	}
 
+	ret = poll(&pollfds, 1, 0);
+	if (ret < 0) {
+		printf("dmodem_put_frame: poll() error: %s\n", strerror(errno));
+		return PJ_SUCCESS;
+	}
+
+	if (pollfds.revents != POLLOUT) {
+		printf("dmodem_put_frame: socket would block when writing\n");
+		return PJ_SUCCESS;
+	}
+
+	if ((len=write(sm->sock, &socket_frame, sizeof(socket_frame))) != sizeof(socket_frame)) {
+		printf("dmodem:error writing audio frame: %s\n", strerror(errno));
+	}
 	return PJ_SUCCESS;
 }
 
