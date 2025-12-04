@@ -423,7 +423,8 @@ int main(int argc, char *argv[]) {
 		cfg.cb.on_call_state = &on_call_state;
 		cfg.cb.on_incoming_call = &on_incoming_call;
 		pjsua_logging_config_default(&log_cfg);
-		log_cfg.console_level = 3;
+		log_cfg.console_level = 4;
+		log_cfg.msg_logging = 0;
 
 		pjsua_media_config_default(&med_cfg);
 		med_cfg.clock_rate = SIP_RATE;
