@@ -480,7 +480,7 @@ int main(int argc, char *argv[]) {
 	memset(&port,0,sizeof(port));
 	port.sock = atoi(argv[2]); // audio socket inherited from parent
 	// Set audio socket non-blocking
-	if(fcntl(port.sock, F_SETFL, O_NONBLOCK) == 0) {
+	if(fcntl(port.sock, F_SETFL, O_NONBLOCK) != 0) {
 		perror("Failed to set audio socket as non-blocking");
 	}
 
