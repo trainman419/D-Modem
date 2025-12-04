@@ -397,7 +397,7 @@ static int mdm_device_read(struct device_struct *dev, char *buf, int size)
 {
 	struct socket_frame socket_frame = { 0 };
 	if (size < MODEM_FRAMESIZE) {
-		DBG("mdm_device_read return");
+		printf("mdm_device_read return");
 		return 0;
 	}
 	while(1) {
@@ -409,6 +409,7 @@ static int mdm_device_read(struct device_struct *dev, char *buf, int size)
 
 		switch (socket_frame.type) {
 			case SOCKET_FRAME_AUDIO:
+				printf("mdm_device_read: got audio frame\n");
 				//DBG("audio frame get")
 				if (ret != sizeof(socket_frame)) {
 					ERR("audio frame size doesn't match %d - %d\n", ret, sizeof(socket_frame));
@@ -433,11 +434,11 @@ static int mdm_device_read(struct device_struct *dev, char *buf, int size)
 				break;
 		}
 
-	if (size < MODEM_FRAMESIZE) {
-		DBG("mdm read framesize")
-		return 0;
-	}
-	return 0;
+		if (size < MODEM_FRAMESIZE) {
+			DBG("mdm read framesize")
+				return 0;
+		}
+    return 0;
 	}
 }
 

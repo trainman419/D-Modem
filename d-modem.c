@@ -66,16 +66,12 @@ static pj_status_t dmodem_put_frame(pjmedia_port *this_port, pjmedia_frame *fram
 	struct socket_frame socket_frame = { 0 };
 	int len;
 
-	if (frame->size == 0) {
-		return PJ_SUCCESS;
-	}
-
-	if (frame->size != sizeof(socket_frame.data.audio.buf)) {
-		return PJSIP_EINVALIDMSG;
-	}
-
 	if (frame->type == PJMEDIA_FRAME_TYPE_AUDIO) {
 		printf("dmodem:writing audio frame\n"); //super debug
+		if (frame->size != sizeof(socket_frame.data.audio.buf)) {
+			return PJSIP_EINVALIDMSG;
+		}
+
 		memcpy(socket_frame.data.audio.buf, frame->buf, frame->size);
 		socket_frame.type = SOCKET_FRAME_AUDIO;
 
@@ -84,6 +80,11 @@ static pj_status_t dmodem_put_frame(pjmedia_port *this_port, pjmedia_frame *fram
 			//error_exit("error writing frame",0);
 		}
 
+	} else if (frame->type == PJMEDIA_FRAME_TYPE_NONE) {
+		//DBG("dmodem_put_frame: got NONE frame with length %ld\n", frame->size);
+		return PJ_SUCCESS;
+	} else {
+		printf("dmodem_put_frame: got unexpected frame type: %d\n", frame->type);
 	}
 
 	return PJ_SUCCESS;
@@ -526,32 +527,29 @@ int main(int argc, char *argv[]) {
 	char sipcid[32];
 
 	struct timeval stmo;
-	fd_set srset,seset;
+	fd_set srset;
 	int sret, len;
 
-	stmo.tv_sec = 0;
-	stmo.tv_usec = 2000;
-
-  running = true;
+	running = true;
 	while(running) {
+		stmo.tv_sec = 1;
+		stmo.tv_usec = 0;
 		FD_ZERO(&srset);
-		FD_ZERO(&seset);
 		FD_SET(sipsocket,&srset);
-		FD_SET(sipsocket,&seset);
-		sret = select(sipsocket + 1,&srset,NULL,&seset,&stmo);
+		sret = select(sipsocket + 1,&srset,NULL,NULL,&stmo);
 
 		if (sret < 0) {
 			printf("dmm: sret < 0/s");
 			if (errno == EINTR) {
 				continue;
-      }
+			}
 			printf("sselect: %s\n",strerror(errno));
-      break;
+			break;
 		}
 
 		if (sret == 0) {
-      continue;
-    }
+			continue;
+		}
 
 		if ((len=read(sipsocket, &sip_socket_frame, sizeof(sip_socket_frame))) != sizeof(sip_socket_frame)) {
 			//error_exit("error reading frame",0);
