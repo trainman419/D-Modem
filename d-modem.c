@@ -23,6 +23,7 @@
 #include <signal.h>
 #include <errno.h>
 #include <poll.h>
+#include <fcntl.h>
 
 #include <sys/socket.h>
 
@@ -58,15 +59,14 @@ static void error_exit(const char *title, pj_status_t status) {
 	pjsua_perror(__FILE__, title, status);
 	if (!destroying) {
 		destroying = true;
-    running = false;
+		running = false;
 	}
 }
 
 static pj_status_t dmodem_put_frame(pjmedia_port *this_port, pjmedia_frame *frame) {
 	struct dmodem *sm = (struct dmodem *)this_port;
 	struct socket_frame socket_frame;
-	struct pollfd pollfds = { .fd = sm->sock, .events = POLLOUT, .revents = 0 };
-	int len, ret;
+	int len;
 
 	memset(&socket_frame, 0, sizeof(socket_frame));
 
@@ -89,19 +89,12 @@ static pj_status_t dmodem_put_frame(pjmedia_port *this_port, pjmedia_frame *fram
 		return PJSIP_EINVALIDMSG;
 	}
 
-	ret = poll(&pollfds, 1, 0);
-	if (ret < 0) {
-		printf("dmodem_put_frame: poll() error: %s\n", strerror(errno));
-		return PJ_SUCCESS;
-	}
-
-	if (pollfds.revents != POLLOUT) {
-		printf("dmodem_put_frame: socket would block when writing\n");
-		return PJ_SUCCESS;
-	}
-
 	if ((len=write(sm->sock, &socket_frame, sizeof(socket_frame))) != sizeof(socket_frame)) {
-		printf("dmodem:error writing audio frame: %s\n", strerror(errno));
+		if(errno == EAGAIN) {
+			printf("dmodem_put_frame: socket would block when writing\n");
+		} else {
+			printf("dmodem:error writing audio frame: %s\n", strerror(errno));
+		}
 	}
 	return PJ_SUCCESS;
 }
@@ -152,8 +145,8 @@ static pj_status_t dmodem_get_frame(pjmedia_port *this_port, pjmedia_frame *fram
 				}
 				break;
 			case SOCKET_FRAME_SIP_INFO:
-        printf("dmodem_get_frame: got unexpected SOCKET_FRAME_SIP_INFO\n");
-        break;
+				printf("dmodem_get_frame: got unexpected SOCKET_FRAME_SIP_INFO\n");
+				break;
 			default:
 				error_exit("Invalid frame received!", 0);
 				// printf("dmodem_get_frame: invalid frame\n");
@@ -486,6 +479,11 @@ int main(int argc, char *argv[]) {
 
 	memset(&port,0,sizeof(port));
 	port.sock = atoi(argv[2]); // audio socket inherited from parent
+	// Set audio socket non-blocking
+	if(fcntl(port.sock, F_SETFL, O_NONBLOCK) == 0) {
+		perror("Failed to set audio socket as non-blocking");
+	}
+
 	pjmedia_port_info_init(&port.base.info, &name, SIGNATURE, SIP_RATE, 1, 16, SIP_FRAMESIZE);
 	port.base.put_frame = dmodem_put_frame;
 	port.base.get_frame = dmodem_get_frame;
@@ -499,8 +497,8 @@ int main(int argc, char *argv[]) {
 	/* Initialization is done, now start pjsua */
 	status = pjsua_start();
 	if (status != PJ_SUCCESS) {
-    error_exit("Error starting pjsua", status);
-  }
+		error_exit("Error starting pjsua", status);
+	}
 
 	if (!direct_call) {
 		pjsua_acc_config cfg;
